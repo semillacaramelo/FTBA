@@ -1,13 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
-"""
-Multi-Agent Forex Trading System
-
-This is the main entry point for the collaborative multi-agent forex trading system.
-It initializes all agents, establishes the messaging infrastructure, and coordinates
-the overall system operation.
-"""
 
 import argparse
 import asyncio
@@ -26,120 +16,76 @@ from agents.risk_management_agent import RiskManagementAgent
 from agents.strategy_optimization_agent import StrategyOptimizationAgent
 from agents.trade_execution_agent import TradeExecutionAgent
 
-
-def setup_logging(config):
-    """Configure the logging system"""
-    log_level = getattr(logging, config["system"].get("log_level", "INFO"))
-    log_directory = "logs"
-    os.makedirs(log_directory, exist_ok=True)
+def setup_logging(config: Dict) -> logging.Logger:
+    """Set up logging based on configuration"""
+    log_level = config.get("system", {}).get("log_level", "INFO")
+    log_dir = "logs"
     
-    log_filename = f"{log_directory}/forex_agents_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+    # Ensure log directory exists
+    os.makedirs(log_dir, exist_ok=True)
     
-    # Configure root logger
+    # Set up logging to file and console
     logging.basicConfig(
-        level=log_level,
-        format='%(asctime)s [%(name)s] %(levelname)s: %(message)s',
+        level=getattr(logging, log_level),
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         handlers=[
-            logging.FileHandler(log_filename),
-            logging.StreamHandler(sys.stdout)
+            logging.FileHandler(f"{log_dir}/system_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"),
+            logging.StreamHandler()
         ]
     )
     
-    logger = logging.getLogger("main")
-    logger.info(f"Logging initialized. Log file: {log_filename}")
-    return logger
+    return logging.getLogger("main")
 
-
-def load_config(config_path="config/settings.json"):
-    """Load system configuration from file"""
-    try:
-        with open(config_path, 'r') as f:
-            config = json.load(f)
-        return config
-    except FileNotFoundError:
-        print(f"Configuration file not found: {config_path}")
-        print("Please create a configuration file or copy from settings.example.json")
-        sys.exit(1)
-    except json.JSONDecodeError:
-        print(f"Invalid JSON in configuration file: {config_path}")
-        sys.exit(1)
-
-
-async def initialize_agents(config, message_broker):
-    """Initialize all agents with their configurations"""
+async def initialize_agents(config: Dict, message_broker) -> Dict:
+    """Initialize all agents based on configuration"""
     agents = {}
     
-    # Create agents with their specific configurations
-    agents["technical_analysis"] = TechnicalAnalysisAgent(
-        "technical_analysis", message_broker, config["agents"]["technical_analysis"]
-    )
+    # Technical Analysis Agent
+    if "technical_analysis" in config.get("agents", {}):
+        technical_agent = TechnicalAnalysisAgent(
+            agent_id="technical_analysis",
+            message_broker=message_broker,
+            config=config["agents"]["technical_analysis"]
+        )
+        agents["technical_analysis"] = technical_agent
     
-    agents["fundamental_analysis"] = FundamentalAnalysisAgent(
-        "fundamental_analysis", message_broker, config["agents"]["fundamental_analysis"]
-    )
+    # Fundamental Analysis Agent
+    if "fundamental_analysis" in config.get("agents", {}):
+        fundamental_agent = FundamentalAnalysisAgent(
+            agent_id="fundamental_analysis",
+            message_broker=message_broker,
+            config=config["agents"]["fundamental_analysis"]
+        )
+        agents["fundamental_analysis"] = fundamental_agent
     
-    agents["risk_management"] = RiskManagementAgent(
-        "risk_management", message_broker, config["agents"]["risk_management"]
-    )
+    # Risk Management Agent
+    if "risk_management" in config.get("agents", {}):
+        risk_agent = RiskManagementAgent(
+            agent_id="risk_management",
+            message_broker=message_broker,
+            config=config["agents"]["risk_management"]
+        )
+        agents["risk_management"] = risk_agent
     
-    agents["strategy_optimization"] = StrategyOptimizationAgent(
-        "strategy_optimization", message_broker, config["agents"]["strategy_optimization"]
-    )
+    # Strategy Optimization Agent
+    if "strategy_optimization" in config.get("agents", {}):
+        strategy_agent = StrategyOptimizationAgent(
+            agent_id="strategy_optimization",
+            message_broker=message_broker,
+            config=config["agents"]["strategy_optimization"]
+        )
+        agents["strategy_optimization"] = strategy_agent
     
-    agents["trade_execution"] = TradeExecutionAgent(
-        "trade_execution", message_broker, config["agents"]["trade_execution"]
-    )
+    # Trade Execution Agent
+    if "trade_execution" in config.get("agents", {}):
+        execution_agent = TradeExecutionAgent(
+            agent_id="trade_execution",
+            message_broker=message_broker,
+            config=config["agents"]["trade_execution"]
+        )
+        agents["trade_execution"] = execution_agent
     
     return agents
-
-
-async def run_system(config):
-    """Main function to run the entire system"""
-    logger = logging.getLogger("main")
-    logger.info("Initializing the Multi-Agent Forex Trading System")
-    
-    # Create message broker
-    message_broker = MessageBroker()
-    logger.info("Message broker initialized")
-    
-    # Initialize all agents
-    agents = await initialize_agents(config, message_broker)
-    logger.info(f"Initialized {len(agents)} agents: {', '.join(agents.keys())}")
-    
-    # Start all agents
-    tasks = []
-    for name, agent in agents.items():
-        logger.info(f"Starting agent: {name}")
-        task = asyncio.create_task(agent.start())
-        tasks.append(task)
-    
-    # Set up graceful shutdown
-    stop_event = asyncio.Event()
-    
-    def handle_shutdown():
-        logger.info("Shutdown signal received. Stopping agents...")
-        stop_event.set()
-    
-    # Register signal handlers
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop = asyncio.get_running_loop()
-        loop.add_signal_handler(sig, handle_shutdown)
-    
-    # Wait for shutdown signal
-    await stop_event.wait()
-    
-    # Stop all agents gracefully
-    for name, agent in agents.items():
-        logger.info(f"Stopping agent: {name}")
-        await agent.stop()
-    
-    # Cancel any remaining tasks
-    for task in tasks:
-        if not task.done():
-            task.cancel()
-    
-    logger.info("System shutdown complete")
-
 
 def parse_arguments():
     """Parse command line arguments"""
@@ -156,17 +102,99 @@ def parse_arguments():
     )
     return parser.parse_args()
 
+async def run_system(config):
+    """Main function to run the entire system"""
+    logger = logging.getLogger("main")
+    logger.info("Initializing the Multi-Agent Forex Trading System")
+    
+    # Create message broker
+    message_broker = MessageBroker()
+    logger.info("Message broker initialized")
+    
+    # Initialize all agents
+    agents = await initialize_agents(config, message_broker)
+    
+    if not agents:
+        logger.error("No agents configured. Please check your configuration.")
+        return
+        
+    logger.info(f"Initialized {len(agents)} agents: {', '.join(agents.keys())}")
+    
+    # Start all agents
+    tasks = []
+    for name, agent in agents.items():
+        logger.info(f"Starting agent: {name}")
+        task = asyncio.create_task(agent.start())
+        tasks.append(task)
+    
+    # Set up graceful shutdown
+    stop_event = asyncio.Event()
+    
+    def handle_shutdown():
+        logger.info("Shutdown signal received. Stopping agents...")
+        stop_event.set()
+    
+    # Register signal handlers only when loop is running
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, handle_shutdown)
+    
+    try:
+        # Wait for shutdown signal
+        await stop_event.wait()
+    except Exception as e:
+        logger.error(f"Error during system operation: {e}")
+    finally:
+        # Stop all agents gracefully
+        for name, agent in agents.items():
+            logger.info(f"Stopping agent: {name}")
+            try:
+                await agent.stop()
+            except Exception as e:
+                logger.error(f"Error stopping agent {name}: {e}")
+        
+        # Cancel any remaining tasks
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+                
+        # Wait for all tasks to complete or be cancelled
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+    
+    logger.info("System shutdown complete")
 
 def main():
     """Entry point for the application"""
     args = parse_arguments()
     
+    # Create default config directory and example config if they don't exist
+    os.makedirs("config", exist_ok=True)
+    
     # Load configuration
-    config = load_config(args.config)
+    if not os.path.exists(args.config):
+        print(f"Configuration file {args.config} not found.")
+        
+        # Check if example config exists
+        example_config = "config/settings.example.json"
+        if os.path.exists(example_config):
+            print(f"You can copy {example_config} to {args.config} to get started.")
+        
+        sys.exit(1)
+    
+    try:
+        with open(args.config) as f:
+            config = json.load(f)
+    except json.JSONDecodeError as e:
+        print(f"Error parsing configuration file: {e}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error loading configuration file: {e}")
+        sys.exit(1)
     
     # Force simulation mode if specified
     if args.simulation:
-        if "trade_execution" in config["agents"]:
+        if "trade_execution" in config.get("agents", {}):
             config["agents"]["trade_execution"]["gateway_type"] = "simulation"
         print("Running in SIMULATION mode - no real trades will be executed")
     
@@ -176,14 +204,14 @@ def main():
     
     # Run the async event loop
     try:
+        if sys.platform == 'win32':
+            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
         asyncio.run(run_system(config))
     except KeyboardInterrupt:
-        logger.info("Keyboard interrupt received. Shutting down...")
+        logger.info("Manual interrupt received. Shutting down...")
     except Exception as e:
-        logger.exception(f"Unhandled exception: {e}")
-    finally:
-        logger.info("System terminated")
-
+        logger.error(f"Critical error: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

@@ -1,134 +1,162 @@
-from dataclasses import dataclass
+
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional, Union
-import uuid
+from typing import List, Dict, Any, Optional
 
-class MessageType(Enum):
-    TECHNICAL_SIGNAL = "technical_signal"
-    FUNDAMENTAL_UPDATE = "fundamental_update"
-    RISK_ASSESSMENT = "risk_assessment"
-    STRATEGY_RECOMMENDATION = "strategy_recommendation"
-    TRADE_PROPOSAL = "trade_proposal"
-    TRADE_EXECUTION = "trade_execution"
-    TRADE_RESULT = "trade_result"
-    SYSTEM_STATUS = "system_status"
-    AGENT_STATUS = "agent_status"
 
 class Direction(Enum):
-    LONG = "long"
-    SHORT = "short"
-    NEUTRAL = "neutral"
+    """Trade direction"""
+    LONG = "LONG"
+    SHORT = "SHORT"
+    FLAT = "FLAT"  # No position/neutral
+
 
 class Confidence(Enum):
-    LOW = 1
-    MEDIUM = 2
-    HIGH = 3
-    VERY_HIGH = 4
+    """Confidence level for signals and analysis"""
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    VERY_HIGH = "VERY_HIGH"
 
-class TradeStatus(Enum):
-    PROPOSED = "proposed"
-    APPROVED = "approved"
-    REJECTED = "rejected"
-    EXECUTED = "executed"
-    PARTIALLY_EXECUTED = "partially_executed"
-    CANCELED = "canceled"
-    EXPIRED = "expired"
 
-@dataclass
-class Message:
-    """Base message class for agent communication"""
-    id: str
-    type: MessageType
-    sender: str
-    timestamp: datetime
-    content: Dict
-    recipients: List[str] = None
-    correlation_id: Optional[str] = None
-    
-    @classmethod
-    def create(cls, msg_type: MessageType, sender: str, content: Dict, recipients=None):
-        """Factory method to create a new message"""
-        return cls(
-            id=str(uuid.uuid4()),
-            type=msg_type,
-            sender=sender,
-            timestamp=datetime.utcnow(),
-            content=content,
-            recipients=recipients
-        )
-
-@dataclass
-class MarketData:
-    """Container for market data"""
-    symbol: str
-    timestamp: datetime
-    bid: float
-    ask: float
-    volume: float
-    additional_data: Dict = None
-
-@dataclass
 class TechnicalSignal:
     """Technical analysis signal"""
-    symbol: str
-    indicator: str
-    direction: Direction
-    confidence: Confidence
-    timeframe: str
-    parameters: Dict
-    value: float
+    
+    def __init__(
+        self,
+        symbol: str,
+        direction: Direction,
+        confidence: Confidence,
+        signal_type: str,
+        timeframe: str,
+        indicators: Dict[str, Any],
+        price_level: float,
+        expiration_time: Optional[datetime] = None
+    ):
+        self.symbol = symbol
+        self.direction = direction
+        self.confidence = confidence
+        self.signal_type = signal_type  # e.g., "trend_following", "reversal", "breakout"
+        self.timeframe = timeframe      # e.g., "1m", "5m", "1h", "4h", "1d"
+        self.indicators = indicators    # Indicator values that triggered the signal
+        self.price_level = price_level  # Current price when signal was generated
+        self.timestamp = datetime.utcnow()
+        self.expiration_time = expiration_time  # When the signal should be considered stale
 
-@dataclass
+
 class FundamentalUpdate:
-    """Fundamental analysis update"""
-    impact_currency: List[str]
-    event: str
-    actual: Optional[float]
-    forecast: Optional[float]
-    previous: Optional[float]
-    impact_assessment: Direction
-    confidence: Confidence
-    timestamp: datetime
+    """Fundamental analysis update/event"""
+    
+    def __init__(
+        self,
+        impact_currency: List[str],  # List of currencies affected
+        event: str,                  # Name of the event
+        expected: Any = None,        # Expected value (if applicable)
+        actual: Any = None,          # Actual value
+        impact: str = "medium",      # Low/medium/high impact
+        direction: Optional[Direction] = None,  # Expected price direction
+        confidence: Optional[Confidence] = None  # Confidence in the analysis
+    ):
+        self.impact_currency = impact_currency
+        self.event = event
+        self.expected = expected
+        self.actual = actual
+        self.impact = impact
+        self.direction = direction
+        self.confidence = confidence
+        self.timestamp = datetime.utcnow()
 
-@dataclass
-class RiskAssessment:
-    """Risk management assessment"""
-    symbol: str
-    max_position_size: float
-    recommended_leverage: float
-    stop_loss_pips: float
-    take_profit_pips: float
-    max_daily_loss: float
-    current_exposure: Dict
-    market_volatility: float
 
-@dataclass
 class TradeProposal:
-    """Trade proposal from the strategy agent"""
-    id: str
-    symbol: str
-    direction: Direction
-    size: float
-    entry_price: Optional[float]
-    stop_loss: float
-    take_profit: float
-    time_limit_seconds: int
-    strategy_name: str
-    technical_confidence: Confidence
-    fundamental_alignment: Confidence
-    risk_score: float
-    status: TradeStatus = TradeStatus.PROPOSED
+    """Proposed trade from strategy to risk management"""
+    
+    def __init__(
+        self,
+        symbol: str,
+        direction: Direction,
+        entry_price: float,
+        stop_loss: float,
+        take_profit: float,
+        confidence: Confidence,
+        strategy_name: str,
+        signals: List[Dict],
+        position_size: Optional[float] = None,  # Can be specified or determined by risk management
+        expiration_time: Optional[datetime] = None
+    ):
+        self.symbol = symbol
+        self.direction = direction
+        self.entry_price = entry_price
+        self.stop_loss = stop_loss
+        self.take_profit = take_profit
+        self.confidence = confidence
+        self.strategy_name = strategy_name
+        self.signals = signals  # List of signals that contributed to this proposal
+        self.position_size = position_size
+        self.timestamp = datetime.utcnow()
+        self.expiration_time = expiration_time
+        self.id = f"trade_{self.timestamp.strftime('%Y%m%d%H%M%S')}_{symbol}"
 
-@dataclass
+
 class TradeExecution:
     """Trade execution details"""
-    proposal_id: str
-    execution_id: str
-    symbol: str
-    direction: Direction
-    executed_size: float
-    executed_price: float
-    execution_time: datetime
-    status: TradeStatus
-    metadata: Dict = None
+    
+    def __init__(
+        self,
+        trade_id: str,
+        symbol: str,
+        direction: Direction,
+        entry_price: float,
+        stop_loss: float,
+        take_profit: float,
+        position_size: float,
+        execution_time: datetime,
+        execution_price: Optional[float] = None,
+        status: str = "pending",  # pending, executed, rejected, canceled
+        metadata: Optional[Dict] = None
+    ):
+        self.trade_id = trade_id
+        self.symbol = symbol
+        self.direction = direction
+        self.entry_price = entry_price
+        self.stop_loss = stop_loss
+        self.take_profit = take_profit
+        self.position_size = position_size
+        self.execution_time = execution_time
+        self.execution_price = execution_price or entry_price
+        self.status = status
+        self.metadata = metadata or {}
+
+
+class TradeResult:
+    """Completed trade result"""
+    
+    def __init__(
+        self,
+        trade_id: str,
+        symbol: str,
+        direction: Direction,
+        entry_price: float,
+        exit_price: float,
+        position_size: float,
+        entry_time: datetime,
+        exit_time: datetime,
+        profit_loss: float,
+        profit_loss_pips: float,
+        exit_reason: str,  # "take_profit", "stop_loss", "manual", etc.
+        strategy_name: str,
+        metadata: Optional[Dict] = None
+    ):
+        self.trade_id = trade_id
+        self.symbol = symbol
+        self.direction = direction
+        self.entry_price = entry_price
+        self.exit_price = exit_price
+        self.position_size = position_size
+        self.entry_time = entry_time
+        self.exit_time = exit_time
+        self.profit_loss = profit_loss
+        self.profit_loss_pips = profit_loss_pips
+        self.exit_reason = exit_reason
+        self.strategy_name = strategy_name
+        self.metadata = metadata or {}
+        self.duration = exit_time - entry_time

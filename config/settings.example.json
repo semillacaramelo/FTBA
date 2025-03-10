@@ -7,27 +7,42 @@
   },
   "market_data": {
     "provider": "simulation",
-    "symbols": ["EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD"]
+    "symbols": ["EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD"],
+    "timeframes": ["1m", "5m", "15m", "1h", "4h", "1d"]
   },
   "risk_management": {
     "max_account_risk_percent": 2.0,
     "max_position_size_percent": 5.0,
-    "max_daily_loss_percent": 5.0
+    "max_daily_loss_percent": 5.0,
+    "max_correlation_exposure": 15.0,
+    "update_interval_seconds": 60
   },
   "agents": {
     "technical_analysis": {
       "analysis_interval_seconds": 60,
-      "signal_threshold": 0.7
+      "signal_threshold": 0.7,
+      "indicators": {
+        "moving_averages": true,
+        "rsi": true,
+        "macd": true,
+        "bollinger_bands": true,
+        "support_resistance": true
+      }
     },
     "fundamental_analysis": {
-      "update_interval_seconds": 300
+      "update_interval_seconds": 300,
+      "currencies_to_monitor": ["USD", "EUR", "GBP", "JPY", "AUD", "CHF", "CAD"],
+      "data_sources": ["simulation"],
+      "sentiment_threshold": 0.5
     },
     "risk_management": {
       "update_interval_seconds": 60
     },
     "strategy_optimization": {
       "update_interval_seconds": 300,
-      "learning_rate": 0.1
+      "learning_rate": 0.1,
+      "optimization_interval_hours": 24,
+      "min_trades_for_optimization": 20
     },
     "trade_execution": {
       "check_interval_seconds": 1,

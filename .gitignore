@@ -52,3 +52,6 @@ data/performance/*
 # OS specific
 .DS_Store
 Thumbs.db
+
+# Attachments
+attached_assets/

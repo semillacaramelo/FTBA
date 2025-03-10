@@ -1,3 +1,146 @@
+# Multi-Agent Forex Trading System - Architecture
+
+## System Overview
+
+The Multi-Agent Forex Trading System is built around a distributed architecture of specialized agents that communicate through a central message broker. Each agent has distinct responsibilities and expertise, collaboratively forming a comprehensive trading system.
+
+## Core Components
+
+### Message Broker
+
+The message broker serves as the communication backbone of the system, enabling:
+
+1. **Decoupled Communication**: Agents don't need direct knowledge of each other
+2. **Event-Driven Architecture**: Processing happens in response to events/messages
+3. **Flexible Topology**: Easy to add, remove, or modify agents
+
+### Base Agent Framework
+
+All agents inherit from a common base `Agent` class that provides:
+
+1. **Lifecycle Management**: Standard setup, processing loop, and cleanup
+2. **Message Handling**: Subscribe to, receive, and send messages
+3. **Error Handling**: Resilient operation with proper error boundaries
+
+## Agent Responsibilities
+
+### Technical Analysis Agent
+
+- Processes market data across multiple timeframes
+- Applies technical indicators and pattern recognition
+- Generates trading signals with confidence levels
+- Focuses purely on price action and chart patterns
+
+### Fundamental Analysis Agent
+
+- Monitors economic news, events, and indicators
+- Processes macroeconomic data releases
+- Analyzes central bank decisions and statements
+- Provides context on likely market moves
+
+### Risk Management Agent
+
+- Validates trade proposals against risk parameters
+- Enforces position sizing rules
+- Prevents excessive exposure to correlated assets
+- Implements circuit breakers during volatile conditions
+
+### Strategy Optimization Agent
+
+- Learns from system performance
+- Tunes strategy parameters based on results
+- Identifies market regimes and optimal strategies
+- Combines technical and fundamental signals
+
+### Trade Execution Agent
+
+- Interfaces with broker/exchange APIs
+- Handles order placement, modification, and cancellation
+- Monitors executions and manages open positions
+- Reports trade results back to the system
+
+## Communication Flow
+
+1. **Signal Generation**: Technical and Fundamental agents analyze market data
+2. **Strategy Formulation**: Strategy Optimization agent combines signals
+3. **Risk Assessment**: Trade proposals are validated by Risk Management
+4. **Trade Execution**: Approved trades are executed
+5. **Performance Feedback**: Results feed back into optimization
+
+## Data Flow Diagram
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌────────────────┐
+│  Market Data    │───▶│Technical Analysis│───▶│    Strategy    │
+│    Sources      │    │      Agent      │    │ Optimization   │
+└─────────────────┘    └─────────────────┘    │     Agent      │
+                                              │                │
+┌─────────────────┐    ┌─────────────────┐    │                │    ┌────────────────┐    ┌────────────────┐
+│  Economic Data  │───▶│  Fundamental    │───▶│                │───▶│     Risk       │───▶│     Trade      │
+│    Sources      │    │ Analysis Agent  │    │                │    │  Management    │    │   Execution    │
+└─────────────────┘    └─────────────────┘    └────────────────┘    │     Agent      │    │     Agent      │
+                                                    ▲                └────────────────┘    └────────────────┘
+                                                    │                        │                     │
+                                                    │                        │                     │
+                                                    └────────────────────────┴─────────────────────┘
+                                                             Performance Feedback
+```
+
+## Message Types
+
+1. **TECHNICAL_SIGNAL**: Technical analysis findings
+2. **FUNDAMENTAL_UPDATE**: Economic news and analysis
+3. **TRADE_PROPOSAL**: Suggested trades from strategy
+4. **TRADE_APPROVAL/REJECTION**: Risk management decisions
+5. **TRADE_EXECUTION**: Executed trade details
+6. **TRADE_RESULT**: Completed trade outcomes
+7. **SYSTEM_STATUS**: System health and status updates
+
+## System Scalability
+
+The event-driven architecture allows for:
+
+- Horizontal scaling by adding agent instances
+- Processing distribution across multiple machines
+- Fault isolation where agent failures don't cascade
+- Easy addition of new agent types or strategies
+
+
+## Implementation Details
+
+### Agent Life Cycle
+
+1. **Initialization**: Agents load configuration and establish message subscriptions
+2. **Processing Cycle**: Each agent runs its main processing loop at configured intervals
+3. **Message Handling**: Agents respond to relevant messages asynchronously
+4. **Shutdown**: Agents perform cleanup operations on system termination
+
+### Message Format
+
+All messages follow a standardized format:
+- Unique message ID
+- Message type
+- Sender identification
+- Timestamp
+- Content payload
+- Optional correlation ID for linked messages
+- Optional recipient list for directed messages
+
+### Error Handling
+
+The system implements multilevel error handling:
+- Individual agents capture and log internal exceptions
+- The message broker ensures message delivery despite agent failures
+- The main system monitors agent health and restarts failed components
+- Persistent storage ensures state recovery after crashes
+
+## Future Extensions
+
+- **Sentiment Analysis Agent**: Process market sentiment from social media
+- **Machine Learning Agent**: Deep learning for pattern recognition
+- **Portfolio Management Agent**: Multi-currency portfolio optimization
+- **Alert/Notification Agent**: External communication of system events
+
 flowchart TB
     subgraph External Data Sources
         MD[Market Data Feeds]
@@ -17,9 +160,9 @@ flowchart TB
         RM[Risk Management Agent]
         SO[Strategy Optimization Agent]
         TE[Trade Execution Agent]
-        
+
         MB[Message Broker]
-        
+
         TA <-->|Analysis & Signals| MB
         FA <-->|Economic Impact Assessment| MB
         RM <-->|Risk Parameters| MB
@@ -197,10 +340,10 @@ The event-driven architecture allows for:
 
 ### Agent Life Cycle
 
-1. **Initialization**: Agents load configuration and establish message subscriptions
-2. **Processing Cycle**: Each agent runs its main processing loop at configured intervals
-3. **Message Handling**: Agents respond to relevant messages asynchronously
-4. **Shutdown**: Agents perform cleanup operations on system termination
+1. Initialization: Agents load configuration and establish message subscriptions
+2. Processing Cycle: Each agent runs its main processing loop at configured intervals
+3. Message Handling: Agents respond to relevant messages asynchronously
+4. Shutdown: Agents perform cleanup operations on system termination
 
 ### Message Format
 
@@ -225,8 +368,8 @@ The system implements multilevel error handling:
 
 The architecture supports several planned extensions:
 
-1. **Machine Learning Pipelines**: Dedicated ML agents for advanced pattern recognition
-2. **Custom Indicator Development**: Framework for developing and testing new indicators
-3. **Multi-market Analysis**: Correlation analysis across different asset classes
-4. **Sentiment Analysis Integration**: Natural language processing of news and social media
-5. **Digital Twin Simulations**: Parallel simulation environments for strategy testing
+1. Machine Learning Pipelines: Dedicated ML agents for advanced pattern recognition
+2. Custom Indicator Development: Framework for developing and testing new indicators
+3. Multi-market Analysis: Correlation analysis across different asset classes
+4. Sentiment Analysis Integration: Natural language processing of news and social media
+5. Digital Twin Simulations: Parallel simulation environments for strategy testing
