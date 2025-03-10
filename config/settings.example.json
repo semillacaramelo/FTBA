@@ -1,0 +1,39 @@
+
+{
+  "system": {
+    "log_level": "INFO",
+    "data_directory": "./data",
+    "backup_directory": "./backups"
+  },
+  "market_data": {
+    "provider": "simulation",
+    "symbols": ["EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD"]
+  },
+  "risk_management": {
+    "max_account_risk_percent": 2.0,
+    "max_position_size_percent": 5.0,
+    "max_daily_loss_percent": 5.0
+  },
+  "agents": {
+    "technical_analysis": {
+      "analysis_interval_seconds": 60,
+      "signal_threshold": 0.7
+    },
+    "fundamental_analysis": {
+      "update_interval_seconds": 300
+    },
+    "risk_management": {
+      "update_interval_seconds": 60
+    },
+    "strategy_optimization": {
+      "update_interval_seconds": 300,
+      "learning_rate": 0.1
+    },
+    "trade_execution": {
+      "check_interval_seconds": 1,
+      "gateway_type": "simulation",
+      "slippage_model": "fixed",
+      "fixed_slippage_pips": 1.0
+    }
+  }
+}
