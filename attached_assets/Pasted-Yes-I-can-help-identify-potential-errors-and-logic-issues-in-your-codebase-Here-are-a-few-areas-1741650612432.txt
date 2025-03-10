@@ -1,0 +1,110 @@
+Yes, I can help identify potential errors and logic issues in your codebase.
+
+Here are a few areas to check in main.py based on the snippet provided:
+
+Argument Parsing: Ensure that the configuration file exists before trying to load it. You might want to add error handling for loading the config to avoid runtime errors if the file is missing or contains errors.
+
+Async Handling: In run_system, the signal handling setup could lead to issues if the event loop is not running when the signal is received. The signal handler setup should occur when the event loop is already running.
+
+Graceful Shutdown: Ensure that all agents are properly stopped and any remaining tasks are canceled effectively. Consider checking if tasks contains any unfinished tasks before canceling them.
+
+Here’s an updated version of your main.py, incorporating these checks:
+
+import argparse
+import asyncio
+import json
+import logging
+import os
+import signal
+import sys
+from datetime import datetime
+from typing import Dict, List
+from system.agent import MessageBroker
+from agents.technical_analysis_agent import TechnicalAnalysisAgent
+from agents.fundamental_analysis_agent import FundamentalAnalysisAgent
+from agents.risk_management_agent import RiskManagementAgent
+from agents.strategy_optimization_agent import StrategyOptimizationAgent
+from agents.trade_execution_agent import TradeExecutionAgent
+def parse_arguments():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(description="Multi-Agent Forex Trading System")
+    parser.add_argument(
+        "--config", 
+        default="config/settings.json",
+        help="Path to configuration file"
+    )
+    parser.add_argument(
+        "--simulation",
+        action="store_true",
+        help="Run in simulation mode (no real trades)"
+    )
+    return parser.parse_args()
+async def run_system(config):
+    """Main function to run the entire system"""
+    logger = logging.getLogger("main")
+    logger.info("Initializing the Multi-Agent Forex Trading System")
+    
+    # Create message broker
+    message_broker = MessageBroker()
+    logger.info("Message broker initialized")
+    
+    # Initialize all agents
+    agents = await initialize_agents(config, message_broker)
+    logger.info(f"Initialized {len(agents)} agents: {', '.join(agents.keys())}")
+    
+    # Start all agents
+    tasks = []
+    for name, agent in agents.items():
+        logger.info(f"Starting agent: {name}")
+        task = asyncio.create_task(agent.start())
+        tasks.append(task)
+    
+    # Set up graceful shutdown
+    stop_event = asyncio.Event()
+    
+    def handle_shutdown():
+        logger.info("Shutdown signal received. Stopping agents...")
+        stop_event.set()
+    
+    # Register signal handlers only when loop is running
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, handle_shutdown)
+    
+    # Wait for shutdown signal
+    await stop_event.wait()
+    
+    # Stop all agents gracefully
+    for name, agent in agents.items():
+        logger.info(f"Stopping agent: {name}")
+        await agent.stop()
+    
+    # Cancel any remaining tasks
+    for task in tasks:
+        if not task.done():
+            task.cancel()
+    
+    logger.info("System shutdown complete")
+def main():
+    """Entry point for the application"""
+    args = parse_arguments()
+    
+    # Load configuration
+    if not os.path.exists(args.config):
+        print(f"Configuration file {args.config} not found.")
+        sys.exit(1)
+        
+    with open(args.config) as f:
+        config = json.load(f)
+    
+    # Force simulation mode if specified
+    if args.simulation:
+        if "trade_execution" in config["agents"]:
+            config["agents"]["trade_execution"]["gateway_type"] = "simulation"
+        print("Running in SIMULATION mode - no real trades will be executed")
+    
+    # Setup logging
+    logger = setup_logging(config)
+    logger.info("Multi-Agent Forex Trading System starting up")
+    
+    # Run the async event loop
