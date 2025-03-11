@@ -1,243 +1,381 @@
-
 import asyncio
-import logging
-from datetime import datetime
-from typing import Dict, List
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional
+import numpy as np
 
-from system.agent import Agent
-from system.core import Message, MessageType, TradeProposal, TradeStatus, RiskAssessment
+from system.agent import Agent, Message, MessageType
+from system.core import (
+    Direction, Confidence, 
+    TradeProposal, TechnicalSignal
+)
 
 class RiskManagementAgent(Agent):
-    """
-    Agent responsible for evaluating trade proposals against risk parameters, 
-    ensuring portfolio-level risk control, and preventing excessive exposure.
-    """
-    
-    def __init__(self, agent_id: str, message_broker, config: Dict):
+    def __init__(self, agent_id: str, message_broker, config):
         super().__init__(agent_id, message_broker)
         self.config = config
-        self.update_interval = config.get("update_interval_seconds", 60)
-        
-        # Risk parameters from configuration
-        self.max_account_risk_percent = config.get("max_account_risk_percent", 2.0)
-        self.max_position_size_percent = config.get("max_position_size_percent", 5.0)
-        self.max_daily_loss_percent = config.get("max_daily_loss_percent", 5.0)
-        
-        # Internal state
-        self.account_balance = 10000.0  # Placeholder for account balance
-        self.open_positions = {}        # Current open positions
-        self.daily_pnl = 0.0            # Daily profit/loss tracking
-        self.market_volatility = {}     # Volatility data by symbol
+        self.max_account_risk = config.get("max_account_risk_percent", 2.0) / 100
+        self.max_position_size_percent = config.get("max_position_size_percent", 5.0) / 100
+        self.account_balance = config.get("initial_balance", 100000.0)
+        self.open_positions = {}  # symbol -> position details
+        self.daily_pnl = 0.0
+        self.max_daily_loss = config.get("max_daily_loss_percent", 5.0) / 100
+        self.correlation_matrix = {}  # symbol pairs -> correlation
+        self.volatility_data = {}  # symbol -> historic volatility
+        self.update_interval = config.get("update_interval_seconds", 60)  # 1 minute
+        self.last_update_time = datetime.min
         
     async def setup(self):
-        """Initialize the agent and subscribe to relevant message types"""
+        """Set up the agent when starting"""
         await self.subscribe_to([
             MessageType.TRADE_PROPOSAL,
+            MessageType.TRADE_EXECUTION, 
             MessageType.TRADE_RESULT,
-            MessageType.SYSTEM_STATUS,
-            MessageType.MARKET_DATA
+            MessageType.TECHNICAL_SIGNAL,
+            MessageType.FUNDAMENTAL_UPDATE
         ])
-        self.logger.info("Risk Management Agent initialized")
+        await self.initialize_risk_models()
+        self.logger.info("Risk Management Agent setup complete.")
     
     async def cleanup(self):
-        """Clean up resources"""
-        self.logger.info("Risk Management Agent shutting down")
+        """Clean up when agent is stopping"""
+        self.open_positions = {}
+        self.logger.info("Risk Management Agent cleaned up")
     
     async def process_cycle(self):
-        """Main processing loop - periodically reassess risk and positions"""
-        await self.update_risk_metrics()
-        await asyncio.sleep(self.update_interval)
+        """Process a single cycle of the agent's main loop"""
+        now = datetime.utcnow()
+        
+        # Check if it's time to update risk models
+        time_since_last = (now - self.last_update_time).total_seconds()
+        if time_since_last >= self.update_interval:
+            await self.update_risk_models()
+            self.last_update_time = now
+        
+        # Check for breached risk thresholds
+        await self.check_portfolio_risk()
+        
+        # Sleep to maintain the desired update frequency
+        await asyncio.sleep(1)
     
     async def handle_message(self, message: Message):
         """Handle incoming messages"""
         if message.type == MessageType.TRADE_PROPOSAL:
-            await self.evaluate_trade_proposal(message)
+            # Evaluate and approve/reject trade proposals
+            await self.evaluate_trade_proposal(message.content.get("proposal"))
+        
+        elif message.type == MessageType.TRADE_EXECUTION:
+            # Update position tracking
+            execution = message.content.get("execution")
+            await self.update_positions(execution)
         
         elif message.type == MessageType.TRADE_RESULT:
-            await self.process_trade_result(message)
+            # Update PnL and risk metrics
+            result = message.content
+            await self.update_pnl(result)
         
-        elif message.type == MessageType.MARKET_DATA:
-            self.update_market_data(message.content)
+        elif message.type == MessageType.TECHNICAL_SIGNAL:
+            # Use technical data to update volatility models
+            signal = message.content.get("signal")
+            if signal:
+                await self.update_volatility_from_signal(signal)
+        
+        elif message.type == MessageType.FUNDAMENTAL_UPDATE:
+            # Use fundamental data to adjust risk parameters
+            update = message.content.get("update")
+            if update:
+                await self.adjust_risk_from_fundamental(update)
     
-    async def evaluate_trade_proposal(self, message: Message):
-        """Evaluate a trade proposal against risk parameters"""
-        proposal_dict = message.content.get("proposal", {})
-        proposal_id = proposal_dict.get("id")
+    async def initialize_risk_models(self):
+        """Initialize risk models with historical data"""
+        # In a real implementation, this would load historical volatility and correlation data
+        # Here we'll initialize with sample values
         
-        try:
-            # Create a TradeProposal object from the message content
-            proposal = TradeProposal(
-                id=proposal_id,
-                symbol=proposal_dict.get("symbol"),
-                direction=proposal_dict.get("direction"),
-                size=proposal_dict.get("size"),
-                entry_price=proposal_dict.get("entry_price"),
-                stop_loss=proposal_dict.get("stop_loss"),
-                take_profit=proposal_dict.get("take_profit"),
-                time_limit_seconds=proposal_dict.get("time_limit_seconds"),
-                strategy_name=proposal_dict.get("strategy_name"),
-                technical_confidence=proposal_dict.get("technical_confidence"),
-                fundamental_alignment=proposal_dict.get("fundamental_alignment"),
-                risk_score=proposal_dict.get("risk_score"),
-                status=TradeStatus.PROPOSED
-            )
-            
-            # Check if we're within daily loss limit
-            if self.daily_pnl < -self.max_daily_loss_percent * self.account_balance / 100.0:
-                self.logger.warning(f"Daily loss limit reached, rejecting proposal {proposal_id}")
-                await self.reject_proposal(proposal_id, "Daily loss limit reached")
-                return
-            
-            # Calculate potential loss if stop-loss is hit
-            potential_loss = self.calculate_potential_loss(proposal)
-            
-            # Check if this loss exceeds account risk limit
-            account_risk_percent = (potential_loss / self.account_balance) * 100.0
-            if account_risk_percent > self.max_account_risk_percent:
-                self.logger.warning(f"Proposal {proposal_id} exceeds account risk limit")
-                
-                # Adjust size to meet risk limit and approve if still valid
-                adjusted_size = proposal.size * (self.max_account_risk_percent / account_risk_percent)
-                if adjusted_size >= 0.01:  # Minimum viable position size
-                    proposal.size = adjusted_size
-                    self.logger.info(f"Adjusted size for proposal {proposal_id} to {adjusted_size}")
-                    await self.approve_proposal(proposal)
+        # Sample forex pairs
+        pairs = ["EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD", "NZD/USD", "USD/CAD", "EUR/GBP"]
+        
+        # Initialize volatility data (typical daily % volatility)
+        for pair in pairs:
+            self.volatility_data[pair] = {
+                "EUR/USD": 0.5, "GBP/USD": 0.7, "USD/JPY": 0.6, 
+                "USD/CHF": 0.6, "AUD/USD": 0.8, "NZD/USD": 0.9,
+                "USD/CAD": 0.6, "EUR/GBP": 0.5
+            }.get(pair, 0.7)  # Default 0.7% daily volatility
+        
+        # Initialize correlation matrix
+        # In a real system, this would be calculated from historical price movements
+        # Here we use typical forex correlations
+        for pair1 in pairs:
+            for pair2 in pairs:
+                key = f"{pair1}_{pair2}"
+                if pair1 == pair2:
+                    self.correlation_matrix[key] = 1.0  # Self correlation is 1.0
+                elif "EUR" in pair1 and "EUR" in pair2:
+                    self.correlation_matrix[key] = 0.8  # EUR pairs tend to be correlated
+                elif "USD" in pair1 and "USD" in pair2:
+                    self.correlation_matrix[key] = 0.6  # USD pairs have moderate correlation
                 else:
-                    await self.reject_proposal(proposal_id, "Position size too small after risk adjustment")
-                return
-            
-            # Check total exposure to this symbol
-            symbol_exposure = self.calculate_symbol_exposure(proposal.symbol)
-            if symbol_exposure + proposal.size > self.max_position_size_percent * self.account_balance / 100.0:
-                self.logger.warning(f"Proposal {proposal_id} would exceed maximum exposure for {proposal.symbol}")
-                await self.reject_proposal(proposal_id, f"Maximum exposure for {proposal.symbol} reached")
-                return
-            
-            # Check current market volatility
-            volatility = self.market_volatility.get(proposal.symbol, 1.0)
-            if volatility > 2.0:  # Arbitrary threshold for high volatility
-                self.logger.warning(f"High volatility for {proposal.symbol}, adjusting risk")
-                # Reduce position size in high volatility
-                proposal.size = proposal.size * 0.5
-            
-            # All checks passed, approve the proposal
-            await self.approve_proposal(proposal)
-            
-        except Exception as e:
-            self.logger.error(f"Error evaluating trade proposal {proposal_id}: {e}")
-            await self.reject_proposal(proposal_id, f"Error in risk evaluation: {str(e)}")
+                    # Random correlation between -0.5 and 0.5 for other pairs
+                    self.correlation_matrix[key] = (np.random.random() - 0.5)
+        
+        self.logger.info(f"Initialized risk models for {len(pairs)} currency pairs")
     
-    async def approve_proposal(self, proposal):
-        """Approve a trade proposal and send it to the execution agent"""
-        proposal.status = TradeStatus.APPROVED
+    async def update_risk_models(self):
+        """Update risk models with recent data"""
+        # In a real implementation, this would recalculate volatility and correlations
+        # based on recent price movements. Here we simulate small changes.
+        
+        # Update volatility with small random changes
+        for pair in self.volatility_data:
+            change = (np.random.random() - 0.5) * 0.1  # +/- 0.05%
+            self.volatility_data[pair] = max(0.1, self.volatility_data[pair] + change)
+        
+        # In a real system, correlations would also be updated
+        # Here we'll leave them static for simplicity
+        
+        self.logger.debug("Updated risk models")
+    
+    async def check_portfolio_risk(self):
+        """Check for overall portfolio risk thresholds"""
+        # Calculate current exposure by currency
+        currency_exposure = {}
+        total_exposure = 0.0
+        
+        for symbol, position in self.open_positions.items():
+            size = position.get("size", 0)
+            direction_mult = 1 if position.get("direction") == Direction.LONG else -1
+            exposure = size * direction_mult
+            
+            # Extract currencies from the symbol
+            if "/" in symbol:
+                base, quote = symbol.split("/")
+                
+                # Base currency exposure
+                if base not in currency_exposure:
+                    currency_exposure[base] = 0
+                currency_exposure[base] += exposure
+                
+                # Quote currency exposure (opposite sign)
+                if quote not in currency_exposure:
+                    currency_exposure[quote] = 0
+                currency_exposure[quote] -= exposure
+            
+            total_exposure += abs(exposure)
+        
+        # Check if we're over-exposed to any single currency
+        max_currency_exposure = self.account_balance * self.max_account_risk * 2
+        for currency, exposure in currency_exposure.items():
+            if abs(exposure) > max_currency_exposure:
+                await self.send_risk_alert(f"Over-exposed to {currency}: {exposure:.2f}")
+        
+        # Check daily PnL against max daily loss
+        if self.daily_pnl < -self.account_balance * self.max_daily_loss:
+            await self.send_risk_alert(f"Daily loss threshold breached: {self.daily_pnl:.2f}")
+            # In a real system, this might trigger an automatic trading halt
+    
+    async def evaluate_trade_proposal(self, proposal_dict):
+        """Evaluate a trade proposal and approve/reject based on risk parameters"""
+        if not proposal_dict:
+            return
+        
+        # Convert dictionary to object for easier handling
+        proposal = TradeProposal(**proposal_dict)
+        symbol = proposal.symbol
+        direction = proposal.direction
+        size = proposal.size
+        
+        # Assign a risk score based on various factors
+        risk_score = 0.0
+        
+        # 1. Check position size against max allowed
+        max_position_size = self.account_balance * self.max_position_size_percent
+        if size > max_position_size:
+            risk_score += 0.5
+            size = max_position_size  # Cap the size
+        
+        # 2. Check volatility
+        volatility = self.volatility_data.get(symbol, 1.0)
+        risk_score += volatility * 0.2  # Higher volatility = higher risk
+        
+        # 3. Check correlation with existing positions
+        for open_symbol, position in self.open_positions.items():
+            corr_key = f"{symbol}_{open_symbol}"
+            correlation = self.correlation_matrix.get(corr_key, 0)
+            open_direction = position.get("direction")
+            
+            # If directions match and correlation is positive, risk increases
+            # If directions oppose and correlation is positive, risk decreases
+            direction_mult = 1 if direction == open_direction else -1
+            risk_score += correlation * direction_mult * 0.1
+        
+        # 4. Adjust stop loss based on volatility
+        volatility_atr = volatility * 100  # Convert to pips approximation
+        
+        # Ensure stop loss is at least 1x daily volatility
+        min_stop_distance = volatility_atr * 1.0
+        if proposal.stop_loss < min_stop_distance:
+            proposal.stop_loss = min_stop_distance
+        
+        # Calculate maximum risk per trade as % of account
+        max_risk_per_trade = self.account_balance * self.max_account_risk
+        
+        # Calculate potential loss in account currency
+        potential_loss = size * (proposal.stop_loss / 10000)  # Convert pips to price change
+        
+        # Adjust size if risk is too high
+        if potential_loss > max_risk_per_trade:
+            size = max_risk_per_trade / (proposal.stop_loss / 10000)
+            proposal.size = size
+        
+        # Make the decision
+        approved = risk_score < 1.0 and self.daily_pnl > -self.account_balance * self.max_daily_loss * 0.8
         
         # Create risk assessment
-        risk_assessment = RiskAssessment(
-            symbol=proposal.symbol,
-            max_position_size=proposal.size,
-            recommended_leverage=1.0,  # Default leverage
-            stop_loss_pips=abs(proposal.entry_price - proposal.stop_loss) * 10000 if proposal.entry_price else 0,
-            take_profit_pips=abs(proposal.take_profit - proposal.entry_price) * 10000 if proposal.entry_price else 0,
-            max_daily_loss=self.max_daily_loss_percent * self.account_balance / 100.0,
-            current_exposure=self.get_current_exposure(),
-            market_volatility=self.market_volatility.get(proposal.symbol, 1.0)
+        assessment = RiskAssessment(
+            symbol=symbol,
+            max_position_size=max_position_size,
+            recommended_leverage=5.0,  # Default leverage
+            stop_loss_pips=proposal.stop_loss,
+            take_profit_pips=proposal.take_profit,
+            max_daily_loss=self.account_balance * self.max_daily_loss,
+            current_exposure=self.open_positions,
+            market_volatility=volatility
         )
         
+        # Update proposal with our assessment
+        proposal.risk_score = risk_score
+        proposal.size = size  # Potentially adjusted size
+        
+        # Update status based on our decision
+        if approved:
+            proposal.status = TradeStatus.APPROVED
+            self.logger.info(f"Trade proposal approved: {symbol} {direction.value} {size}")
+        else:
+            proposal.status = TradeStatus.REJECTED
+            self.logger.info(f"Trade proposal rejected: {symbol} {direction.value} {size}, risk_score: {risk_score}")
+        
+        # Send back our assessment and updated proposal
         await self.send_message(
             MessageType.RISK_ASSESSMENT,
             {
-                "proposal_id": proposal.id,
-                "assessment": risk_assessment.__dict__,
-                "approved": True,
-                "adjusted_proposal": proposal.__dict__,
-                "timestamp": datetime.utcnow().isoformat()
+                "assessment": assessment.__dict__,
+                "proposal": proposal.__dict__,
+                "approved": approved
             },
-            recipients=["trade_execution"]
+            recipients=[proposal_dict.get("sender", "")]
         )
-        
-        self.logger.info(f"Approved trade proposal {proposal.id} for {proposal.symbol}")
     
-    async def reject_proposal(self, proposal_id, reason):
-        """Reject a trade proposal"""
-        await self.send_message(
-            MessageType.RISK_ASSESSMENT,
-            {
-                "proposal_id": proposal_id,
-                "approved": False,
-                "reason": reason,
-                "timestamp": datetime.utcnow().isoformat()
-            },
-            recipients=["strategy_optimization", "trade_execution"]
-        )
-        self.logger.info(f"Rejected trade proposal {proposal_id}: {reason}")
-    
-    async def process_trade_result(self, message: Message):
-        """Process the result of a trade execution"""
-        result = message.content
-        
-        # Update our internal state based on the trade result
-        trade_pnl = result.get("pnl", 0.0)
-        self.daily_pnl += trade_pnl
-        
-        # Update open positions
-        execution = result.get("execution", {})
-        symbol = execution.get("symbol")
-        
-        if execution.get("status") == TradeStatus.EXECUTED.value:
-            # Add to open positions
-            if symbol not in self.open_positions:
-                self.open_positions[symbol] = 0
-            self.open_positions[symbol] += execution.get("executed_size", 0)
-        
-        elif execution.get("status") in [TradeStatus.CANCELED.value, TradeStatus.EXPIRED.value]:
-            # Position was closed
-            if symbol in self.open_positions:
-                self.open_positions[symbol] -= execution.get("executed_size", 0)
-                if self.open_positions[symbol] <= 0:
-                    del self.open_positions[symbol]
-    
-    async def update_risk_metrics(self):
-        """Update risk metrics based on current market conditions and positions"""
-        # Calculate current exposure for all symbols
-        total_exposure = sum(self.open_positions.values())
-        account_exposure_percent = (total_exposure / self.account_balance) * 100.0
-        
-        self.logger.info(f"Current account exposure: {account_exposure_percent:.2f}%")
-        self.logger.info(f"Daily P&L: {self.daily_pnl:.2f}")
-        
-        # Check if we need to reduce exposure
-        if account_exposure_percent > self.max_account_risk_percent * 1.5:  # Over 150% of limit
-            self.logger.warning("Total exposure exceeds safe limits, considering position reduction")
-            # In a real implementation, might send signals to reduce positions
-    
-    def update_market_data(self, data):
-        """Update market data for risk calculations"""
-        symbol = data.get("symbol")
-        if not symbol:
+    async def update_positions(self, execution):
+        """Update position tracking based on trade execution"""
+        if not execution:
             return
+        
+        symbol = execution.get("symbol")
+        direction = execution.get("direction")
+        size = execution.get("executed_size", 0)
+        price = execution.get("executed_price", 0)
+        status = execution.get("status")
+        
+        # If position was opened
+        if status == TradeStatus.EXECUTED.value:
+            # If we already have a position in this symbol
+            if symbol in self.open_positions:
+                existing = self.open_positions[symbol]
+                existing_size = existing.get("size", 0)
+                existing_direction = existing.get("direction")
+                
+                # If same direction, add to position
+                if direction == existing_direction:
+                    new_size = existing_size + size
+                    avg_price = (existing.get("price", 0) * existing_size + price * size) / new_size
+                    self.open_positions[symbol].update({
+                        "size": new_size,
+                        "price": avg_price
+                    })
+                else:
+                    # If opposite direction, reduce position
+                    new_size = existing_size - size
+                    if new_size > 0:
+                        # Original position is larger, just reduce size
+                        self.open_positions[symbol]["size"] = new_size
+                    elif new_size < 0:
+                        # New position is larger, flip direction and update size
+                        self.open_positions[symbol] = {
+                            "size": abs(new_size),
+                            "price": price,
+                            "direction": direction
+                        }
+                    else:
+                        # Positions cancel out exactly
+                        del self.open_positions[symbol]
+            else:
+                # New position
+                self.open_positions[symbol] = {
+                    "size": size,
+                    "price": price,
+                    "direction": direction
+                }
             
-        # Update volatility calculation
-        # In a real implementation, this would be a more sophisticated calculation
-        # For this example, we'll use a very simple placeholder
-        if "high" in data and "low" in data:
-            daily_range = data["high"] - data["low"]
-            avg_price = (data["high"] + data["low"]) / 2
-            volatility = daily_range / avg_price
-            self.market_volatility[symbol] = volatility
+            self.logger.info(f"Updated position tracking for {symbol}: {self.open_positions.get(symbol)}")
     
-    def calculate_potential_loss(self, proposal):
-        """Calculate potential loss if stop-loss is hit"""
-        if not proposal.entry_price or not proposal.stop_loss:
-            # If market order, use placeholder risk calculation
-            return proposal.size * 0.01  # Assume 1% risk
-            
-        price_distance = abs(proposal.entry_price - proposal.stop_loss)
-        return proposal.size * price_distance
+    async def update_pnl(self, result):
+        """Update profit and loss tracking"""
+        if not result:
+            return
+        
+        profit = result.get("profit", 0)
+        self.daily_pnl += profit
+        self.account_balance += profit
+        
+        symbol = result.get("symbol")
+        if symbol in self.open_positions and result.get("position_closed", False):
+            del self.open_positions[symbol]
+            self.logger.info(f"Position closed for {symbol}, profit: {profit}")
     
-    def calculate_symbol_exposure(self, symbol):
-        """Calculate current exposure to a specific symbol"""
-        return self.open_positions.get(symbol, 0.0)
+    async def update_volatility_from_signal(self, signal):
+        """Update volatility models based on technical signals"""
+        if not signal:
+            return
+        
+        symbol = signal.get("symbol")
+        if symbol and symbol in self.volatility_data:
+            # Adjust volatility slightly based on signal confidence
+            confidence = signal.get("confidence")
+            if confidence:
+                # Convert confidence to numeric value
+                conf_value = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "VERY_HIGH": 4}.get(confidence, 0)
+                
+                # Higher confidence signals might indicate more volatile market conditions
+                if conf_value >= 3:  # HIGH or VERY_HIGH
+                    self.volatility_data[symbol] *= 1.05  # Increase volatility estimate by 5%
     
-    def get_current_exposure(self):
-        """Get the current exposure for all symbols"""
-        return self.open_positions.copy()
+    async def adjust_risk_from_fundamental(self, update):
+        """Adjust risk parameters based on fundamental updates"""
+        if not update:
+            return
+        
+        event = update.get("event")
+        
+        # If this is a high-impact event notification
+        if event and "Upcoming Event" in event:
+            # Extract currency
+            impact_currency = update.get("impact_currency", [])
+            if impact_currency:
+                currency = impact_currency[0]
+                
+                # Temporarily increase volatility expectations for pairs with this currency
+                for symbol in self.volatility_data:
+                    if currency in symbol:
+                        self.volatility_data[symbol] *= 1.2  # Increase volatility expectation by 20%
+                        self.logger.info(f"Increased volatility for {symbol} due to upcoming event for {currency}")
+    
+    async def send_risk_alert(self, message):
+        """Send a risk alert to other agents"""
+        await self.send_message(
+            MessageType.SYSTEM_STATUS,
+            {
+                "alert": "RISK_ALERT",
+                "message": message,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        )
+        self.logger.warning(f"RISK ALERT: {message}")

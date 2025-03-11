@@ -1,362 +1,363 @@
-
 import asyncio
-import logging
-import json
-import random
-from datetime import datetime
-from typing import Dict, List, Any
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional
+import numpy as np
+import pandas as pd
+import uuid
 
-from system.agent import Agent
-from system.core import Message, MessageType, Direction, Confidence, TradeProposal, TradeStatus
+from system.agent import Agent, Message, MessageType
+from system.core import (
+    Direction, Confidence,
+    TradeProposal, TechnicalSignal, FundamentalUpdate
+)
 
 class StrategyOptimizationAgent(Agent):
-    """
-    Agent responsible for leveraging machine learning to continuously refine trading strategies
-    based on performance metrics and market conditions.
-    """
-    
-    def __init__(self, agent_id: str, message_broker, config: Dict):
+    def __init__(self, agent_id: str, message_broker, config):
         super().__init__(agent_id, message_broker)
         self.config = config
-        self.update_interval = config.get("update_interval_seconds", 300)
+        self.strategies = {}  # strategy_name -> strategy_config
+        self.strategy_performance = {}  # strategy_name -> performance metrics
+        self.technical_signals = {}  # symbol -> list of recent signals
+        self.fundamental_updates = {}  # symbol -> list of recent updates
+        self.risk_assessments = {}  # symbol -> latest risk assessment
+        self.trade_history = []  # List of past trades and results
         self.learning_rate = config.get("learning_rate", 0.1)
-        
-        # Strategy parameters and performance metrics
-        self.strategies = {}
-        self.strategy_performance = {}
-        self.market_regime = "neutral"  # Current market regime (trending, ranging, volatile)
-        self.signals_cache = {}        # Recent technical and fundamental signals
-        self.trades_history = []       # Recent trades for performance analysis
+        self.update_interval = config.get("update_interval_seconds", 300)  # 5 minutes
+        self.last_update_time = datetime.min
+        self.watchlist = config.get("watchlist", ["EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF"])
         
     async def setup(self):
-        """Initialize the agent and subscribe to relevant message types"""
+        """Set up the agent when starting"""
         await self.subscribe_to([
             MessageType.TECHNICAL_SIGNAL,
             MessageType.FUNDAMENTAL_UPDATE,
             MessageType.RISK_ASSESSMENT,
-            MessageType.TRADE_RESULT,
-            MessageType.SYSTEM_STATUS
+            MessageType.TRADE_RESULT
         ])
-        
-        # Load strategy definitions
-        await self.load_strategies()
-        
-        self.logger.info("Strategy Optimization Agent initialized")
+        await self.initialize_strategies()
+        self.logger.info("Strategy Optimization Agent setup complete.")
     
     async def cleanup(self):
-        """Clean up resources"""
-        self.logger.info("Strategy Optimization Agent shutting down")
+        """Clean up when agent is stopping"""
+        # Save strategy performance metrics for future sessions
+        self.logger.info("Strategy Optimization Agent cleaned up")
     
     async def process_cycle(self):
-        """Main processing loop - optimize strategies and generate trade proposals"""
-        await self.analyze_performance()
-        await self.optimize_strategies()
-        await self.detect_market_regime()
-        await self.generate_trade_proposals()
-        await asyncio.sleep(self.update_interval)
+        """Process a single cycle of the agent's main loop"""
+        now = datetime.utcnow()
+        
+        # Check if it's time to update strategies
+        time_since_last = (now - self.last_update_time).total_seconds()
+        if time_since_last >= self.update_interval:
+            await self.optimize_strategies()
+            self.last_update_time = now
+        
+        # Check for trading opportunities
+        await self.identify_trading_opportunities()
+        
+        # Clean up old data
+        await self.clean_old_data()
+        
+        # Sleep to maintain the desired update frequency
+        await asyncio.sleep(1)
     
     async def handle_message(self, message: Message):
         """Handle incoming messages"""
         if message.type == MessageType.TECHNICAL_SIGNAL:
-            await self.process_technical_signal(message)
+            # Store technical signals for strategy application
+            signal = message.content.get("signal")
+            if signal:
+                await self.process_technical_signal(signal)
         
         elif message.type == MessageType.FUNDAMENTAL_UPDATE:
-            await self.process_fundamental_update(message)
+            # Store fundamental updates for strategy application
+            update = message.content.get("update")
+            if update:
+                await self.process_fundamental_update(update)
         
         elif message.type == MessageType.RISK_ASSESSMENT:
-            await self.process_risk_assessment(message)
+            # Update our risk parameters based on risk assessment
+            assessment = message.content.get("assessment")
+            if assessment:
+                symbol = assessment.get("symbol")
+                if symbol:
+                    self.risk_assessments[symbol] = assessment
         
         elif message.type == MessageType.TRADE_RESULT:
-            await self.process_trade_result(message)
+            # Learn from trade results
+            await self.learn_from_trade_result(message.content)
     
-    async def load_strategies(self):
-        """Load trading strategies and their parameters"""
-        # In a real implementation, this would load from a database or configuration
-        # For this example, we'll define some hardcoded strategy definitions
-        
+    async def initialize_strategies(self):
+        """Initialize trading strategies"""
+        # Define some basic strategies
         self.strategies = {
             "trend_following": {
-                "description": "Follows medium to long-term market trends",
-                "parameters": {
-                    "ema_short": 9,
-                    "ema_long": 21,
-                    "rsi_period": 14,
-                    "rsi_overbought": 70,
-                    "rsi_oversold": 30,
-                    "confidence_threshold": 0.7
-                },
-                "best_regime": "trending",
-                "timeframes": ["1h", "4h", "1d"],
-                "enabled": True
-            },
-            "mean_reversion": {
-                "description": "Trades price reversals to the mean",
-                "parameters": {
-                    "bollinger_period": 20,
-                    "bollinger_std": 2.0,
-                    "rsi_period": 7,
-                    "rsi_overbought": 80,
-                    "rsi_oversold": 20,
-                    "confidence_threshold": 0.65
-                },
-                "best_regime": "ranging",
-                "timeframes": ["15m", "1h"],
-                "enabled": True
+                "type": "trend",
+                "description": "Follows medium-term trends identified by technical indicators",
+                "timeframes": ["1h", "4h"],
+                "technical_weight": 0.7,
+                "fundamental_weight": 0.3,
+                "required_signal_strength": 2.0,
+                "profit_target_pips": 100,
+                "stop_loss_pips": 50,
+                "performance": {
+                    "win_rate": 0.55,
+                    "profit_factor": 1.2,
+                    "avg_win_pips": 80,
+                    "avg_loss_pips": 40,
+                    "trades_count": 0
+                }
             },
             "breakout": {
-                "description": "Trades price breakouts from consolidation",
-                "parameters": {
-                    "atr_period": 14,
-                    "breakout_factor": 1.5,
-                    "volume_increase_threshold": 2.0,
-                    "consolidation_bars": 10,
-                    "confidence_threshold": 0.75
-                },
-                "best_regime": "volatile",
-                "timeframes": ["15m", "1h", "4h"],
-                "enabled": True
+                "type": "breakout",
+                "description": "Identifies and trades breakouts from consolidation patterns",
+                "timeframes": ["15m", "1h"],
+                "technical_weight": 0.8,
+                "fundamental_weight": 0.2,
+                "required_signal_strength": 2.5,
+                "profit_target_pips": 50,
+                "stop_loss_pips": 30,
+                "performance": {
+                    "win_rate": 0.48,
+                    "profit_factor": 1.3,
+                    "avg_win_pips": 45,
+                    "avg_loss_pips": 25,
+                    "trades_count": 0
+                }
+            },
+            "mean_reversion": {
+                "type": "reversion",
+                "description": "Trades reversals back to the mean after price extremes",
+                "timeframes": ["1h", "4h"],
+                "technical_weight": 0.6,
+                "fundamental_weight": 0.4,
+                "required_signal_strength": 2.2,
+                "profit_target_pips": 60,
+                "stop_loss_pips": 40,
+                "performance": {
+                    "win_rate": 0.6,
+                    "profit_factor": 1.1,
+                    "avg_win_pips": 40,
+                    "avg_loss_pips": 35,
+                    "trades_count": 0
+                }
+            },
+            "news_momentum": {
+                "type": "news",
+                "description": "Trades momentum after significant economic news releases",
+                "timeframes": ["5m", "15m"],
+                "technical_weight": 0.3,
+                "fundamental_weight": 0.7,
+                "required_signal_strength": 3.0,
+                "profit_target_pips": 40,
+                "stop_loss_pips": 25,
+                "performance": {
+                    "win_rate": 0.52,
+                    "profit_factor": 1.25,
+                    "avg_win_pips": 35,
+                    "avg_loss_pips": 20,
+                    "trades_count": 0
+                }
             }
         }
         
-        # Initialize performance metrics for each strategy
-        for strategy_name in self.strategies:
-            self.strategy_performance[strategy_name] = {
-                "trades_count": 0,
-                "win_rate": 0.5,  # Initial value
-                "profit_factor": 1.0,  # Initial value
-                "avg_profit": 0.0,
-                "avg_loss": 0.0,
-                "consecutive_losses": 0
-            }
-        
-        self.logger.info(f"Loaded {len(self.strategies)} strategies")
+        self.logger.info(f"Initialized {len(self.strategies)} trading strategies")
     
-    async def process_technical_signal(self, message: Message):
-        """Process technical analysis signals"""
-        signal_data = message.content.get("signal", {})
-        timestamp = message.content.get("timestamp")
+    async def optimize_strategies(self):
+        """Optimize strategies based on recent performance"""
+        # In a real system, this would run ML algorithms to optimize parameters
+        # Here we'll do some simple adjustments based on recent performance
         
-        if not signal_data:
-            return
+        for name, strategy in self.strategies.items():
+            performance = strategy.get("performance", {})
+            trades_count = performance.get("trades_count", 0)
             
-        symbol = signal_data.get("symbol")
-        if not symbol:
-            return
-            
-        # Cache the signal
-        if symbol not in self.signals_cache:
-            self.signals_cache[symbol] = {
-                "technical": [],
-                "fundamental": []
-            }
-        
-        # Add to cache and limit size
-        self.signals_cache[symbol]["technical"].append({
-            "timestamp": timestamp,
-            "data": signal_data
-        })
-        
-        # Keep only latest 20 signals per symbol
-        self.signals_cache[symbol]["technical"] = self.signals_cache[symbol]["technical"][-20:]
-        
-        # Check if we have enough signals to evaluate a trading opportunity
-        await self.evaluate_trading_opportunity(symbol)
-    
-    async def process_fundamental_update(self, message: Message):
-        """Process fundamental analysis updates"""
-        update_data = message.content.get("update", {})
-        timestamp = message.content.get("timestamp")
-        
-        if not update_data:
-            return
-            
-        impact_currencies = update_data.get("impact_currency", [])
-        
-        # Cache the update for each impacted currency
-        for currency in impact_currencies:
-            # Find symbols that include this currency
-            symbols = self.get_symbols_with_currency(currency)
-            
-            for symbol in symbols:
-                if symbol not in self.signals_cache:
-                    self.signals_cache[symbol] = {
-                        "technical": [],
-                        "fundamental": []
-                    }
+            if trades_count > 10:  # Only optimize if we have enough data
+                win_rate = performance.get("win_rate", 0.5)
+                profit_factor = performance.get("profit_factor", 1.0)
                 
-                self.signals_cache[symbol]["fundamental"].append({
-                    "timestamp": timestamp,
-                    "data": update_data
-                })
-                
-                # Keep only latest 10 updates per symbol
-                self.signals_cache[symbol]["fundamental"] = self.signals_cache[symbol]["fundamental"][-10:]
-                
-                # Check if we have a trading opportunity
-                await self.evaluate_trading_opportunity(symbol)
+                # Adjust stop loss and take profit based on performance
+                if win_rate > 0.55 and profit_factor > 1.2:
+                    # Strategy is doing well - can we increase profit target?
+                    strategy["profit_target_pips"] *= 1.05  # Increase by 5%
+                    self.logger.info(f"Increased profit target for strategy {name}")
+                elif win_rate < 0.45 or profit_factor < 0.95:
+                    # Strategy is struggling - reduce stop loss to cut losses faster
+                    strategy["stop_loss_pips"] *= 0.95  # Decrease by 5%
+                    self.logger.info(f"Decreased stop loss for strategy {name}")
+        
+        self.logger.debug("Optimized trading strategies")
     
-    async def process_risk_assessment(self, message: Message):
-        """Process risk assessment response"""
-        approved = message.content.get("approved", False)
-        proposal_id = message.content.get("proposal_id")
-        
-        if not approved:
-            reason = message.content.get("reason", "Unknown reason")
-            self.logger.info(f"Trade proposal {proposal_id} rejected: {reason}")
-            
-            # Update strategy performance based on rejected proposal
-            strategy_name = self.get_strategy_for_proposal(proposal_id)
-            if strategy_name:
-                # Penalize the strategy slightly for rejected proposals
-                self.update_strategy_confidence(strategy_name, -0.01)
-        else:
-            self.logger.info(f"Trade proposal {proposal_id} approved")
-    
-    async def process_trade_result(self, message: Message):
-        """Process trade execution results"""
-        result = message.content
-        execution = result.get("execution", {})
-        proposal_id = execution.get("proposal_id")
-        pnl = result.get("pnl", 0.0)
-        
-        # Update trade history
-        self.trades_history.append({
-            "timestamp": datetime.utcnow().isoformat(),
-            "proposal_id": proposal_id,
-            "symbol": execution.get("symbol"),
-            "direction": execution.get("direction"),
-            "size": execution.get("executed_size"),
-            "entry_price": execution.get("executed_price"),
-            "exit_price": result.get("exit_price"),
-            "pnl": pnl,
-            "status": execution.get("status")
-        })
-        
-        # Limit history size
-        self.trades_history = self.trades_history[-100:]
-        
-        # Update strategy performance metrics
-        strategy_name = self.get_strategy_for_proposal(proposal_id)
-        if strategy_name:
-            self.update_strategy_performance(strategy_name, pnl)
-    
-    async def evaluate_trading_opportunity(self, symbol):
-        """Evaluate if there's a trading opportunity for a symbol"""
-        if symbol not in self.signals_cache:
-            return
-            
-        technical_signals = self.signals_cache[symbol].get("technical", [])
-        fundamental_updates = self.signals_cache[symbol].get("fundamental", [])
-        
-        # Need at least some signals to proceed
-        if not technical_signals:
-            return
-            
-        # Evaluate each strategy for this symbol
-        for strategy_name, strategy in self.strategies.items():
-            if not strategy.get("enabled", True):
+    async def identify_trading_opportunities(self):
+        """Identify potential trading opportunities based on signals and strategies"""
+        for symbol in self.watchlist:
+            # Skip if we don't have enough data
+            if symbol not in self.technical_signals or not self.technical_signals[symbol]:
                 continue
-                
-            # Check if strategy is suitable for current market regime
-            if strategy.get("best_regime") != self.market_regime and random.random() > 0.3:
-                # 70% chance to skip strategies not optimal for current regime
-                continue
-                
-            # Check if we have technical signals in the strategy's preferred timeframes
-            valid_signals = [
-                s for s in technical_signals 
-                if s["data"].get("timeframe") in strategy.get("timeframes", [])
-            ]
             
-            if not valid_signals:
-                continue
+            # Evaluate each strategy for this symbol
+            for strategy_name, strategy in self.strategies.items():
+                score, direction = await self.score_opportunity(symbol, strategy)
                 
-            # Basic implementation - check for directional agreement in latest signals
-            latest_signals = valid_signals[-3:]  # Last 3 signals
-            
-            if not latest_signals:
-                continue
+                # If score exceeds threshold, propose a trade
+                if score >= strategy["required_signal_strength"]:
+                    await self.propose_trade(symbol, direction, strategy_name, strategy, score)
+    
+    async def score_opportunity(self, symbol, strategy):
+        """Score a trading opportunity for a specific symbol and strategy"""
+        tech_weight = strategy.get("technical_weight", 0.5)
+        fund_weight = strategy.get("fundamental_weight", 0.5)
+        strategy_type = strategy.get("type")
+        timeframes = strategy.get("timeframes", [])
+        
+        # Calculate technical score
+        tech_score = 0
+        tech_count = 0
+        tech_direction = Direction.NEUTRAL
+        
+        if symbol in self.technical_signals:
+            for signal in self.technical_signals[symbol]:
+                # Skip old signals
+                if (datetime.utcnow() - datetime.fromisoformat(signal.get("timestamp", ""))).total_seconds() > 3600:
+                    continue
                 
-            # Count signals by direction
-            long_signals = sum(1 for s in latest_signals if s["data"].get("direction") == Direction.LONG.value)
-            short_signals = sum(1 for s in latest_signals if s["data"].get("direction") == Direction.SHORT.value)
-            
-            # Determine overall direction
-            direction = None
-            if long_signals > short_signals and long_signals >= 2:
-                direction = Direction.LONG
-            elif short_signals > long_signals and short_signals >= 2:
-                direction = Direction.SHORT
-            else:
-                continue  # No clear direction
-            
-            # Calculate confidence based on signal agreement and strategy performance
-            confidence = (max(long_signals, short_signals) / len(latest_signals)) * \
-                         self.strategy_performance[strategy_name].get("win_rate", 0.5)
-            
-            # Check fundamental alignment if available
-            fundamental_alignment = Confidence.MEDIUM  # Default
-            if fundamental_updates:
-                # Simple check if any fundamental updates align with the direction
-                aligned_updates = sum(1 for u in fundamental_updates[-3:] 
-                                  if u["data"].get("impact_assessment") == direction.value)
+                # Check if signal matches timeframe for the strategy
+                signal_timeframe = signal.get("timeframe")
+                if signal_timeframe in timeframes:
+                    # Determine signal strength based on confidence
+                    confidence = signal.get("confidence", "MEDIUM")
+                    conf_value = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "VERY_HIGH": 4}.get(confidence, 2)
+                    
+                    # Direction impact
+                    direction = signal.get("direction")
+                    dir_value = 1 if direction == Direction.LONG.value else -1 if direction == Direction.SHORT.value else 0
+                    
+                    tech_score += dir_value * conf_value
+                    tech_count += 1
+                    
+                    # For trend strategy, prioritize signals on longer timeframes
+                    if strategy_type == "trend" and signal_timeframe in ["1h", "4h", "1d"]:
+                        tech_score += dir_value * conf_value * 0.5  # Extra weight
+                    
+                    # For breakout strategy, prioritize high momentum signals
+                    if strategy_type == "breakout" and conf_value >= 3:
+                        tech_score += dir_value * conf_value * 0.5  # Extra weight
+                    
+                    # For mean reversion, look for extreme signals in opposite direction
+                    if strategy_type == "reversion" and conf_value >= 3:
+                        tech_score -= dir_value * conf_value * 0.5  # Reverse logic
+        
+        # Normalize technical score
+        if tech_count > 0:
+            tech_score = tech_score / tech_count
+            tech_direction = Direction.LONG if tech_score > 0 else Direction.SHORT if tech_score < 0 else Direction.NEUTRAL
+        
+        # Calculate fundamental score
+        fund_score = 0
+        fund_count = 0
+        fund_direction = Direction.NEUTRAL
+        
+        # Extract currencies from symbol
+        base_currency = quote_currency = None
+        if "/" in symbol:
+            base_currency, quote_currency = symbol.split("/")
+        
+        if base_currency and quote_currency:
+            # Look at fundamental updates for both currencies
+            for currency in [base_currency, quote_currency]:
+                curr_updates = []
+                # Gather all updates for this currency
+                for curr, updates in self.fundamental_updates.items():
+                    if curr == currency or (isinstance(curr, list) and currency in curr):
+                        curr_updates.extend(updates)
                 
-                if aligned_updates > 0:
+                for update in curr_updates:
+                    # Skip old updates
+                    if (datetime.utcnow() - datetime.fromisoformat(update.get("timestamp", ""))).total_seconds() > 86400:
+                        continue
+                    
+                    # Determine impact direction and strength
+                    impact = update.get("impact_assessment")
+                    confidence = update.get("confidence", "MEDIUM")
+                    conf_value = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "VERY_HIGH": 4}.get(confidence, 2)
+                    
+                    # Direction impact - adjusted for currency position in the pair
+                    dir_value = 0
+                    if impact == Direction.LONG.value:
+                        dir_value = 1 if currency == base_currency else -1
+                    elif impact == Direction.SHORT.value:
+                        dir_value = -1 if currency == base_currency else 1
+                    
+                    # Special case for news strategy
+                    if strategy_type == "news" and "Upcoming Event" in update.get("event", ""):
+                        fund_score += dir_value * conf_value * 2.0  # Extra weight for news events
+                    else:
+                        fund_score += dir_value * conf_value
+                    
+                    fund_count += 1
+        
+        # Normalize fundamental score
+        if fund_count > 0:
+            fund_score = fund_score / fund_count
+            fund_direction = Direction.LONG if fund_score > 0 else Direction.SHORT if fund_score < 0 else Direction.NEUTRAL
+        
+        # Calculate final score with weighted average
+        final_score = 0
+        if tech_count > 0 and fund_count > 0:
+            final_score = tech_score * tech_weight + fund_score * fund_weight
+        elif tech_count > 0:
+            final_score = tech_score
+        elif fund_count > 0:
+            final_score = fund_score
+        
+        # Determine final direction
+        final_direction = Direction.NEUTRAL
+        if final_score > 0:
+            final_direction = Direction.LONG
+        elif final_score < 0:
+            final_direction = Direction.SHORT
+        
+        return abs(final_score), final_direction
+    
+    async def propose_trade(self, symbol, direction, strategy_name, strategy, score):
+        """Propose a trade based on strategy and signals"""
+        if direction == Direction.NEUTRAL:
+            return
+        
+        # Create a new trade proposal
+        proposal_id = str(uuid.uuid4())
+        
+        # Determine entry, stop loss, and take profit
+        entry_price = None  # Market order
+        stop_loss_pips = strategy.get("stop_loss_pips", 50)
+        take_profit_pips = strategy.get("profit_target_pips", 100)
+        
+        # Determine position size (will be adjusted by risk manager)
+        size = 10000  # Standard lot, risk manager will adjust
+        
+        # Calculate technical and fundamental confidence
+        technical_confidence = Confidence.MEDIUM
+        if score > 3.0:
+            technical_confidence = Confidence.VERY_HIGH
+        elif score > 2.5:
+            technical_confidence = Confidence.HIGH
+        elif score < 1.5:
+            technical_confidence = Confidence.LOW
+        
+        fundamental_alignment = Confidence.MEDIUM
+        if symbol in self.fundamental_updates and self.fundamental_updates[symbol]:
+            # Use the most recent fundamental update
+            recent = sorted(self.fundamental_updates[symbol], 
+                           key=lambda x: datetime.fromisoformat(x.get("timestamp", "")), 
+                           reverse=True)[0]
+            
+            if recent.get("impact_assessment") == direction.value:
+                if recent.get("confidence") == "HIGH":
                     fundamental_alignment = Confidence.HIGH
-                elif aligned_updates < 0:
-                    fundamental_alignment = Confidence.LOW
-            
-            # Apply confidence threshold from strategy
-            confidence_threshold = strategy["parameters"].get("confidence_threshold", 0.65)
-            if confidence >= confidence_threshold:
-                # Generate trade proposal
-                await self.create_trade_proposal(
-                    symbol, 
-                    direction, 
-                    strategy_name,
-                    self.confidence_level_from_value(confidence),
-                    fundamental_alignment
-                )
-    
-    async def create_trade_proposal(self, symbol, direction, strategy_name, 
-                                   technical_confidence, fundamental_alignment):
-        """Create and send a trade proposal"""
-        # Generate a unique proposal ID
-        proposal_id = f"prop_{strategy_name}_{int(datetime.utcnow().timestamp())}"
-        
-        # Get current price (in a real implementation, this would come from market data)
-        current_price = 1.1000  # Placeholder
-        
-        # Calculate entry, stop loss and take profit levels
-        entry_price = current_price
-        
-        # Simple fixed pip values (in a real implementation, these would be dynamic)
-        stop_pips = 30
-        target_pips = 50
-        
-        if direction == Direction.LONG:
-            stop_loss = entry_price - (stop_pips / 10000)
-            take_profit = entry_price + (target_pips / 10000)
-        else:  # SHORT
-            stop_loss = entry_price + (stop_pips / 10000)
-            take_profit = entry_price - (target_pips / 10000)
-        
-        # Calculate position size (in a real implementation, this would be based on risk models)
-        size = 0.1  # Placeholder standard lot size
-        
-        # Calculate overall risk score (0-100, higher is riskier)
-        risk_score = 50.0  # Default medium risk
-        
-        # Adjust risk based on confidence levels
-        if technical_confidence == Confidence.HIGH:
-            risk_score -= 10
-        elif technical_confidence == Confidence.LOW:
-            risk_score += 10
-            
-        if fundamental_alignment == Confidence.HIGH:
-            risk_score -= 10
-        elif fundamental_alignment == Confidence.LOW:
-            risk_score += 10
+                elif recent.get("confidence") == "VERY_HIGH":
+                    fundamental_alignment = Confidence.VERY_HIGH
+            else:
+                fundamental_alignment = Confidence.LOW
         
         # Create the trade proposal
         proposal = TradeProposal(
@@ -365,183 +366,124 @@ class StrategyOptimizationAgent(Agent):
             direction=direction,
             size=size,
             entry_price=entry_price,
-            stop_loss=stop_loss,
-            take_profit=take_profit,
+            stop_loss=stop_loss_pips,
+            take_profit=take_profit_pips,
             time_limit_seconds=3600,  # 1 hour expiry
             strategy_name=strategy_name,
             technical_confidence=technical_confidence,
             fundamental_alignment=fundamental_alignment,
-            risk_score=risk_score,
+            risk_score=0.0,  # Will be set by risk manager
             status=TradeStatus.PROPOSED
         )
         
-        # Send the proposal to the Risk Management Agent
+        # Send the proposal to the risk manager
         await self.send_message(
             MessageType.TRADE_PROPOSAL,
-            {
-                "proposal": proposal.__dict__,
-                "timestamp": datetime.utcnow().isoformat()
-            },
-            recipients=["risk_management"]
+            {"proposal": proposal.__dict__, "sender": self.agent_id}
         )
-        
-        self.logger.info(f"Sent trade proposal {proposal_id} for {symbol} {direction.value}")
+        self.logger.info(f"Proposed {direction.value} trade for {symbol} using {strategy_name} strategy")
     
-    async def analyze_performance(self):
-        """Analyze trading performance to inform strategy optimization"""
-        if not self.trades_history:
+    async def process_technical_signal(self, signal):
+        """Process and store a technical signal"""
+        symbol = signal.get("symbol")
+        if not symbol:
             return
-            
-        # Calculate overall performance metrics
-        total_trades = len(self.trades_history)
-        profitable_trades = sum(1 for t in self.trades_history if t.get("pnl", 0) > 0)
-        losing_trades = sum(1 for t in self.trades_history if t.get("pnl", 0) < 0)
         
-        if total_trades > 0:
-            win_rate = profitable_trades / total_trades
-            self.logger.info(f"Overall performance: {win_rate:.2f} win rate over {total_trades} trades")
+        if symbol not in self.technical_signals:
+            self.technical_signals[symbol] = []
         
-        # Analyze performance by strategy, symbol, timeframe, etc.
-        # This would be much more detailed in a real implementation
-    
-    async def optimize_strategies(self):
-        """Optimize strategy parameters based on performance"""
-        # In a real implementation, this would use machine learning techniques
-        # For this example, we'll make simple adjustments based on performance
+        # Add timestamp if not present
+        if "timestamp" not in signal:
+            signal["timestamp"] = datetime.utcnow().isoformat()
         
-        for strategy_name, performance in self.strategy_performance.items():
-            if strategy_name not in self.strategies:
-                continue
-                
-            # Skip optimization if not enough data
-            if performance.get("trades_count", 0) < 10:
-                continue
-                
-            strategy = self.strategies[strategy_name]
-            
-            # Adjust confidence threshold based on win rate
-            win_rate = performance.get("win_rate", 0.5)
-            current_threshold = strategy["parameters"].get("confidence_threshold", 0.65)
-            
-            if win_rate < 0.4:
-                # Increase threshold if win rate is low (more conservative)
-                new_threshold = min(0.9, current_threshold + self.learning_rate)
-                strategy["parameters"]["confidence_threshold"] = new_threshold
-                self.logger.info(f"Increased confidence threshold for {strategy_name} to {new_threshold:.2f}")
-            
-            elif win_rate > 0.6:
-                # Decrease threshold if win rate is high (more aggressive)
-                new_threshold = max(0.5, current_threshold - self.learning_rate / 2)
-                strategy["parameters"]["confidence_threshold"] = new_threshold
-                self.logger.info(f"Decreased confidence threshold for {strategy_name} to {new_threshold:.2f}")
-            
-            # Additional parameter optimization would go here
-            # This could include adjusting indicator periods, factor values, etc.
+        self.technical_signals[symbol].append(signal)
     
-    async def detect_market_regime(self):
-        """Detect the current market regime (trending, ranging, volatile)"""
-        # In a real implementation, this would analyze market conditions
-        # For this example, we'll use a simple placeholder
-        
-        # Simple random change occasionally for demonstration
-        if random.random() < 0.1:  # 10% chance to change regime
-            regimes = ["trending", "ranging", "volatile"]
-            new_regime = random.choice(regimes)
-            
-            if new_regime != self.market_regime:
-                self.logger.info(f"Market regime changed from {self.market_regime} to {new_regime}")
-                self.market_regime = new_regime
-    
-    async def generate_trade_proposals(self):
-        """Proactively generate trade proposals based on current market conditions"""
-        # Most proposals will be generated in response to signals
-        # This method could generate proposals for specific strategies
-        # that don't rely on immediate signals (e.g., scheduled trades)
-        pass
-    
-    def update_strategy_performance(self, strategy_name, pnl):
-        """Update performance metrics for a strategy based on trade result"""
-        if strategy_name not in self.strategy_performance:
+    async def process_fundamental_update(self, update):
+        """Process and store a fundamental update"""
+        impact_currencies = update.get("impact_currency", [])
+        if not impact_currencies:
             return
+        
+        # Add timestamp if not present
+        if "timestamp" not in update:
+            update["timestamp"] = datetime.utcnow().isoformat()
+        
+        # Store update for each currency
+        for currency in impact_currencies:
+            if currency not in self.fundamental_updates:
+                self.fundamental_updates[currency] = []
+            self.fundamental_updates[currency].append(update)
             
-        perf = self.strategy_performance[strategy_name]
+            # Also store for currency pairs containing this currency
+            for symbol in self.watchlist:
+                if currency in symbol:
+                    if symbol not in self.fundamental_updates:
+                        self.fundamental_updates[symbol] = []
+                    self.fundamental_updates[symbol].append(update)
+    
+    async def learn_from_trade_result(self, result):
+        """Learn from trade results to improve strategy performance"""
+        if not result:
+            return
+        
+        strategy_name = result.get("strategy_name")
+        if not strategy_name or strategy_name not in self.strategies:
+            return
+        
+        # Get strategy
+        strategy = self.strategies[strategy_name]
+        performance = strategy.get("performance", {})
         
         # Update trade count
-        perf["trades_count"] = perf.get("trades_count", 0) + 1
+        trades_count = performance.get("trades_count", 0) + 1
+        performance["trades_count"] = trades_count
         
-        # Update win/loss metrics
-        if pnl > 0:
-            # Profitable trade
-            perf["consecutive_losses"] = 0
-            profitable_trades = perf.get("trades_count", 1) * perf.get("win_rate", 0.5)
-            profitable_trades += 1
-            perf["win_rate"] = profitable_trades / perf["trades_count"]
-            
-            # Update average profit
-            perf["avg_profit"] = (perf.get("avg_profit", 0) * (profitable_trades - 1) + pnl) / profitable_trades
-            
-        elif pnl < 0:
-            # Losing trade
-            perf["consecutive_losses"] = perf.get("consecutive_losses", 0) + 1
-            profitable_trades = perf.get("trades_count", 1) * perf.get("win_rate", 0.5)
-            perf["win_rate"] = profitable_trades / perf["trades_count"]
-            
-            # Update average loss
-            losing_trades = perf["trades_count"] - profitable_trades
-            perf["avg_loss"] = (perf.get("avg_loss", 0) * (losing_trades - 1) + abs(pnl)) / losing_trades
+        # Calculate result metrics
+        profit_pips = result.get("profit_pips", 0)
+        is_win = profit_pips > 0
         
-        # Calculate profit factor
-        if perf.get("avg_loss", 0) > 0:
-            perf["profit_factor"] = (perf.get("avg_profit", 0) * perf.get("win_rate", 0)) / \
-                                   (perf.get("avg_loss", 1) * (1 - perf.get("win_rate", 0)))
+        # Update win rate
+        current_wins = performance.get("win_rate", 0.5) * (trades_count - 1)
+        if is_win:
+            current_wins += 1
+        new_win_rate = current_wins / trades_count
+        performance["win_rate"] = new_win_rate
         
-        # Disable strategy if too many consecutive losses
-        if perf["consecutive_losses"] >= 5:
-            self.logger.warning(f"Strategy {strategy_name} has {perf['consecutive_losses']} consecutive losses. Disabling.")
-            self.strategies[strategy_name]["enabled"] = False
-    
-    def update_strategy_confidence(self, strategy_name, adjustment):
-        """Adjust strategy confidence based on feedback"""
-        if strategy_name not in self.strategy_performance:
-            return
-            
-        # Simple adjustment to win rate (proxy for confidence)
-        current_win_rate = self.strategy_performance[strategy_name].get("win_rate", 0.5)
-        new_win_rate = max(0.1, min(0.9, current_win_rate + adjustment))
-        self.strategy_performance[strategy_name]["win_rate"] = new_win_rate
-    
-    def get_strategy_for_proposal(self, proposal_id):
-        """Find the strategy that generated a proposal"""
-        # In a real implementation, this would look up in a database
-        # For this example, we'll parse from the proposal ID format we used
-        if proposal_id and proposal_id.startswith("prop_"):
-            parts = proposal_id.split("_")
-            if len(parts) > 1:
-                return parts[1]
-        return None
-    
-    def get_symbols_with_currency(self, currency):
-        """Get forex pairs that include a specific currency"""
-        # In a real implementation, this would come from configuration or market data
-        # For this example, we'll use a simple mapping
-        currency_map = {
-            "USD": ["EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD"],
-            "EUR": ["EUR/USD", "EUR/JPY", "EUR/GBP", "EUR/CHF"],
-            "GBP": ["GBP/USD", "EUR/GBP", "GBP/JPY"],
-            "JPY": ["USD/JPY", "EUR/JPY", "GBP/JPY"],
-            "CHF": ["USD/CHF", "EUR/CHF"],
-            "AUD": ["AUD/USD", "AUD/JPY"]
-        }
-        
-        return currency_map.get(currency, [])
-    
-    def confidence_level_from_value(self, value):
-        """Convert a numeric confidence value to a Confidence enum"""
-        if value >= 0.8:
-            return Confidence.VERY_HIGH
-        elif value >= 0.65:
-            return Confidence.HIGH
-        elif value >= 0.4:
-            return Confidence.MEDIUM
+        # Update average win/loss
+        if is_win:
+            current_avg_win = performance.get("avg_win_pips", 0)
+            performance["avg_win_pips"] = (current_avg_win * (trades_count - 1) + profit_pips) / trades_count
         else:
-            return Confidence.LOW
+            current_avg_loss = performance.get("avg_loss_pips", 0)
+            performance["avg_loss_pips"] = (current_avg_loss * (trades_count - 1) + abs(profit_pips)) / trades_count
+        
+        # Update profit factor
+        avg_win = performance.get("avg_win_pips", 0)
+        avg_loss = performance.get("avg_loss_pips", 0)
+        if avg_loss > 0:
+            performance["profit_factor"] = (avg_win * new_win_rate) / (avg_loss * (1 - new_win_rate))
+        
+        self.logger.info(f"Updated performance for {strategy_name}: win_rate={new_win_rate:.2f}")
+        
+        # Store trade history for further analysis
+        self.trade_history.append(result)
+    
+    async def clean_old_data(self):
+        """Clean up old signals and updates"""
+        now = datetime.utcnow()
+        cutoff = now - timedelta(days=1)
+        
+        # Clean technical signals
+        for symbol in list(self.technical_signals.keys()):
+            self.technical_signals[symbol] = [
+                s for s in self.technical_signals[symbol]
+                if datetime.fromisoformat(s.get("timestamp", "")) > cutoff
+            ]
+        
+        # Clean fundamental updates
+        for key in list(self.fundamental_updates.keys()):
+            self.fundamental_updates[key] = [
+                u for u in self.fundamental_updates[key]
+                if datetime.fromisoformat(u.get("timestamp", "")) > cutoff
+            ]
+            
