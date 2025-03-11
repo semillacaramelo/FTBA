@@ -2,113 +2,132 @@
 import asyncio
 import logging
 import time
+import os
+import json
+import websockets
+import uuid
 from typing import Dict, List, Any, Optional
 
+# We're using our own implementation of DerivAPI since the package is not readily available
 class DerivAPI:
-    """Mock DerivAPI class for development without actual dependency"""
+    """Basic DerivAPI implementation using websockets directly"""
+    def __init__(self, app_id, endpoint, token=None):
+        self.app_id = app_id
+        self.endpoint = endpoint
+        self.token = token
+        self.connection = None
+        self.request_id = 0
+        self.logger = logging.getLogger("deriv_api")
+    
+    async def __aenter__(self):
+        await self.connect()
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.disconnect()
+    
+    async def connect(self):
+        """Connect to the API endpoint"""
+        if self.connection is None or self.connection.closed:
+            endpoint_with_app_id = f"{self.endpoint}?app_id={self.app_id}"
+            self.connection = await websockets.connect(endpoint_with_app_id)
+            # Authenticate if token is provided
+            if self.token:
+                await self.authorize(self.token)
+        return self.connection
+    
     async def disconnect(self):
-        pass
+        """Disconnect from the API endpoint"""
+        if self.connection and not self.connection.closed:
+            await self.connection.close()
+        self.connection = None
+    
+    async def send_request(self, request):
+        """Send a request to the API"""
+        if self.connection is None or self.connection.closed:
+            await self.connect()
+            
+        self.request_id += 1
+        request['req_id'] = self.request_id
+        
+        await self.connection.send(json.dumps(request))
+        response = await self.connection.recv()
+        return json.loads(response)
+    
+    async def authorize(self, token):
+        """Authorize with API token"""
+        request = {
+            "authorize": token
+        }
+        return await self.send_request(request)
     
     async def ping(self):
-        return {"ping": 1}
+        """Ping the API to check connection"""
+        request = {
+            "ping": 1
+        }
+        return await self.send_request(request)
     
     async def active_symbols(self, **kwargs):
-        # Return some sample forex symbols for testing
-        return {
-            "active_symbols": [
-                {
-                    "symbol": "frxEURUSD",
-                    "display_name": "EUR/USD",
-                    "market": "forex",
-                    "market_display_name": "Forex"
-                },
-                {
-                    "symbol": "frxGBPUSD",
-                    "display_name": "GBP/USD",
-                    "market": "forex",
-                    "market_display_name": "Forex"
-                },
-                {
-                    "symbol": "frxUSDJPY",
-                    "display_name": "USD/JPY",
-                    "market": "forex",
-                    "market_display_name": "Forex"
-                }
-            ]
+        """Get active symbols"""
+        request = {
+            "active_symbols": kwargs.get("active_symbols", "brief"),
+            "product_type": kwargs.get("product_type", "basic")
         }
+        return await self.send_request(request)
     
     async def proposal(self, **kwargs):
-        # Mock proposal response with contract ID
-        return {
-            "proposal": {
-                "id": "mock_proposal_123",
-                "ask_price": 10.50,
-                "date_start": 0,
-                "date_expiry": 0,
-                "spot": 1.10532,
-                "spot_time": 0,
-                "payout": 19.05
-            }
+        """Get price proposal"""
+        request = {
+            "proposal": 1,
+            "contract_type": kwargs.get("contract_type"),
+            "currency": kwargs.get("currency"),
+            "symbol": kwargs.get("symbol"),
+            "amount": kwargs.get("amount"),
+            "basis": kwargs.get("basis", "stake"),
+            "duration": kwargs.get("duration"),
+            "duration_unit": kwargs.get("duration_unit")
         }
+        return await self.send_request(request)
     
-    async def buy(self, **kwargs):
-        # Mock buy response
-        return {
-            "buy": {
-                "contract_id": "mock_contract_456",
-                "longcode": "Win payout if EUR/USD is strictly higher than entry spot after 5 minutes.",
-                "start_time": 0,
-                "transaction_id": "mock_transaction_789"
-            }
+    async def buy(self, proposal_id: str, price: float = None) -> Dict:
+        """Buy a contract"""
+        request = {
+            "buy": proposal_id,
+            "price": price
         }
+        return await self.send_request(request)
     
     async def proposal_open_contract(self, **kwargs):
-        # Mock proposal open contract
-        return {
-            "proposal_open_contract": {
-                "contract_id": kwargs.get("contract_id", "unknown"),
-                "status": "open",
-                "entry_spot": 1.10532,
-                "current_spot": 1.10982,
-                "profit": 5.25,
-                "profit_percentage": 50.0
-            }
+        """Get open contract details"""
+        request = {
+            "proposal_open_contract": 1,
+            "contract_id": kwargs.get("contract_id")
         }
+        return await self.send_request(request)
     
     async def cancel(self, **kwargs):
-        # Mock cancel response
-        return {
-            "cancel": {
-                "contract_id": kwargs.get("cancel", "unknown"),
-                "refund_amount": 9.25
-            }
+        """Cancel a contract"""
+        request = {
+            "cancel": kwargs.get("cancel")
         }
+        return await self.send_request(request)
     
     async def balance(self, **kwargs):
-        # Mock balance response
-        return {
-            "balance": {
-                "balance": 1000.00,
-                "currency": "USD",
-                "loginid": "MOCK123456",
-                "total": 1000.00
-            }
+        """Get account balance"""
+        request = {
+            "balance": 1,
+            "account": kwargs.get("account", "current")
         }
+        return await self.send_request(request)
     
     async def ticks(self, **kwargs):
-        # Mock ticks response
-        symbol = kwargs.get("ticks", "unknown")
-        return {
-            "tick": {
-                "symbol": symbol,
-                "id": "mock_tick_1",
-                "quote": 1.10532,
-                "epoch": 0
-            },
-            "subscription": {
-                "id": "mock_sub_1"
-            }
+        """Get tick data for a symbol"""
+        request = {
+            "ticks": kwargs.get("ticks"),
+            "subscribe": kwargs.get("subscribe", 1)
         }
+        return await self.send_request(request)
 
 class ResponseError(Exception):
     """Mock response error class"""
@@ -148,10 +167,28 @@ class DerivApiClient:
         try:
             self.logger.info(f"Connecting to Deriv API at {self.endpoint}")
             
-            # In a real implementation, this would use the actual Deriv API
-            # from deriv_api import DerivAPI
-            # Create a mock DerivAPI instance - our mock class doesn't take parameters
-            self.api = DerivAPI()
+            # Get API credentials from environment variables
+            app_id = os.environ.get('DERIV_APP_ID', self.app_id)
+            if not app_id:
+                self.logger.warning("DERIV_APP_ID environment variable is not set, using default app_id")
+                app_id = self.app_id
+                
+            # Determine which API token to use based on ENVIRONMENT variable
+            environment = os.environ.get('ENVIRONMENT', 'demo').lower()
+            
+            if environment == 'demo':
+                token = os.environ.get('DERIV_DEMO_API_TOKEN')
+                self.logger.info("Using DEMO account for API connection")
+            else:
+                token = os.environ.get('DERIV_API_TOKEN')
+                self.logger.info("Using REAL account for API connection")
+                
+            if not token:
+                token_var = 'DERIV_DEMO_API_TOKEN' if environment == 'demo' else 'DERIV_API_TOKEN'
+                self.logger.warning(f"{token_var} environment variable is not set, using demo mode without authentication")
+            
+            # Create a real DerivAPI instance with appropriate parameters
+            self.api = DerivAPI(app_id=app_id, endpoint=self.endpoint, token=token)
             
             # Validate connection with a ping
             ping_result = await self.ping()
@@ -264,19 +301,38 @@ class DerivApiClient:
         Returns:
             List[Dict]: List of available symbols
         """
-        response = await self._execute_with_retry(
-            "get_active_symbols",
-            lambda: self.api.active_symbols(active_symbols="brief", product_type="basic")
-        )
+        self.logger.info(f"Fetching active symbols for market type: {market_type}")
         
-        if "error" in response:
+        try:
+            response = await self._execute_with_retry(
+                "get_active_symbols",
+                lambda: self.api.active_symbols(active_symbols="brief", product_type="basic")
+            )
+            
+            if "error" in response:
+                self.logger.error(f"Error fetching active symbols: {response.get('error')}")
+                return []
+            
+            symbols = response.get('active_symbols', [])
+            self.logger.info(f"Received {len(symbols)} symbols from Deriv API")
+            
+            # Log a few symbols to debug
+            if symbols:
+                sample_symbols = symbols[:3]
+                for symbol in sample_symbols:
+                    self.logger.info(f"Symbol example - Display name: {symbol.get('display_name')}, Symbol: {symbol.get('symbol')}")
+            
+            # Filter by market type (e.g., forex)
+            if market_type:
+                filtered_symbols = [s for s in symbols 
+                       if s.get('market', '').lower() == market_type.lower()]
+                self.logger.info(f"Filtered to {len(filtered_symbols)} {market_type} symbols")
+                return filtered_symbols
+                
+            return symbols
+        except Exception as e:
+            self.logger.error(f"Exception in get_active_symbols: {e}")
             return []
-        
-        # Filter by market type (e.g., forex)
-        if market_type:
-            return [s for s in response.get('active_symbols', []) 
-                   if s.get('market', '').lower() == market_type.lower()]
-        return response.get('active_symbols', [])
     
     async def get_price_proposal(self, symbol: str, contract_type: str, 
                                amount: float, duration: int, duration_unit: str,
@@ -295,20 +351,50 @@ class DerivApiClient:
         Returns:
             Dict: Price proposal details
         """
-        response = await self._execute_with_retry(
-            "get_price_proposal",
-            lambda: self.api.proposal(
-                contract_type=contract_type,
-                currency="USD",
-                symbol=symbol,
-                amount=amount,
-                basis=basis,
-                duration=duration,
-                duration_unit=duration_unit
-            )
-        )
+        self.logger.info(f"Requesting price proposal for {symbol} - {contract_type}, amount: {amount}, duration: {duration}{duration_unit}")
         
-        return response.get('proposal', {})
+        try:
+            # Make sure symbol is in the correct format for Deriv API
+            deriv_symbol = self._map_to_deriv_symbol(symbol)
+            self.logger.info(f"Using Deriv symbol: {deriv_symbol}")
+            
+            # Set up the request parameters
+            proposal_params = {
+                "contract_type": contract_type,
+                "currency": "USD",
+                "symbol": deriv_symbol,
+                "amount": amount,
+                "basis": basis,
+                "duration": duration,
+                "duration_unit": duration_unit
+            }
+            
+            # Execute API request with retry logic
+            response = await self._execute_with_retry(
+                "get_price_proposal",
+                lambda: self.api.proposal(**proposal_params)
+            )
+            
+            # Check for errors
+            if "error" in response:
+                error_code = response.get("error", {}).get("code", "unknown")
+                error_message = response.get("error", {}).get("message", "Unknown error")
+                self.logger.error(f"Price proposal error: {error_code} - {error_message}")
+                return {}
+                
+            # Extract proposal data
+            proposal = response.get('proposal', {})
+            
+            if proposal:
+                self.logger.info(f"Received proposal - ID: {proposal.get('id')}, Price: {proposal.get('ask_price')}")
+            else:
+                self.logger.error("No proposal data in response")
+                
+            return proposal
+            
+        except Exception as e:
+            self.logger.error(f"Exception in get_price_proposal for {symbol}: {e}")
+            return {}
     
     async def buy_contract(self, proposal_id: str, price: float) -> Dict:
         """
@@ -321,16 +407,43 @@ class DerivApiClient:
         Returns:
             Dict: Contract purchase details
         """
-        response = await self._execute_with_retry(
-            "buy_contract",
-            lambda: self.api.buy(
-                buy=1,
-                price=price,
-                proposal_id=proposal_id
-            )
-        )
+        self.logger.info(f"Buying contract with proposal ID: {proposal_id}, price: {price}")
         
-        return response.get('buy', {})
+        try:
+            # Validate inputs to prevent None values
+            if not proposal_id:
+                self.logger.error("Cannot buy contract: proposal_id is empty")
+                return {}
+            
+            # Execute the buy request
+            # According to Deriv API docs, we need to send the contract parameters
+            response = await self._execute_with_retry(
+                "buy_contract",
+                lambda: self.api.buy(proposal_id=proposal_id, price=price)  # Send price from proposal
+            )
+            
+            # Check for errors
+            if "error" in response:
+                error_code = response.get("error", {}).get("code", "unknown")
+                error_message = response.get("error", {}).get("message", "Unknown error")
+                self.logger.error(f"Buy contract error: {error_code} - {error_message}")
+                return {}
+                
+            # Extract contract details
+            buy_data = response.get('buy', {})
+            
+            if buy_data:
+                contract_id = buy_data.get("contract_id")
+                self.logger.info(f"Successfully purchased contract: {contract_id}")
+                self.logger.info(f"Contract details: Balance change: {buy_data.get('balance_after')} - {buy_data.get('balance_before')}")
+            else:
+                self.logger.error("No contract purchase data in response")
+                
+            return buy_data
+            
+        except Exception as e:
+            self.logger.error(f"Exception in buy_contract: {e}")
+            return {}
     
     async def get_contract_update(self, contract_id: str) -> Dict:
         """
@@ -453,9 +566,9 @@ class DerivApiClient:
             # Determine contract type based on direction
             contract_type = "CALL" if direction == "LONG" else "PUT"
             
-            # Default duration (we'll use 5 minutes for now, but this should come from config)
-            duration = 5
-            duration_unit = "m"
+            # Default duration (we'll use 1 day since some shorter durations are not supported)
+            duration = 1
+            duration_unit = "d"
             
             # Get price proposal first
             proposal_response = await self.get_price_proposal(

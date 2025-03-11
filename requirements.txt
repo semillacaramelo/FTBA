@@ -100,3 +100,6 @@ pytest-asyncio
 aiohttp
 nest-asyncio
 websockets
+websockets
+websockets
+websockets

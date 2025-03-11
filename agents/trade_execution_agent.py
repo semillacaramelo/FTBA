@@ -361,6 +361,128 @@ class TradeExecutionAgent(Agent):
             self.logger.error(f"Error executing trade: {e}")
             return None
     
+    async def execute_test_trades(self):
+        """
+        Execute one PUT and one CALL trade for testing purposes using the
+        real Deriv API with a demo account.
+        
+        Returns:
+            Tuple of (success, message)
+        """
+        if not self.api_client:
+            return False, "API client not initialized"
+        
+        # Ensure we're connected to the API
+        if not hasattr(self.api_client, 'connected') or not self.api_client.connected:
+            self.logger.info("API client not connected, attempting to connect...")
+            connection_success = await self.api_client.connect()
+            if not connection_success:
+                return False, "Failed to connect to Deriv API"
+                
+        # Fetch available assets from the Deriv API
+        available_assets = await self.api_client.get_active_symbols("forex")
+        
+        if not available_assets:
+            self.logger.error("No assets available from Deriv API")
+            return False, "No available assets for trading from Deriv API"
+        
+        # Choose EUR/USD as the preferred symbol if available
+        symbol = None
+        standard_symbol = "EUR/USD"
+        deriv_symbol = "frxEURUSD"  # The expected Deriv format for EUR/USD
+        
+        # Find EUR/USD in the available assets
+        for asset in available_assets:
+            if asset.get("display_name") == standard_symbol or asset.get("symbol") == deriv_symbol:
+                symbol = asset.get("symbol")  # Use the Deriv symbol format (e.g., frxEURUSD)
+                self.logger.info(f"Found EUR/USD in available assets: {symbol}")
+                break
+        
+        # If EUR/USD not found, use the first available forex symbol
+        if not symbol and available_assets:
+            symbol = available_assets[0].get("symbol")
+            self.logger.info(f"EUR/USD not found, using alternative symbol: {symbol}")
+            
+        if not symbol:
+            return False, "Failed to find a suitable symbol for test trades"
+            
+        self.logger.info(f"Executing test trades for symbol: {symbol}")
+        
+        # Set a small test size
+        size = 10.0  # Minimal stake amount
+        
+        try:
+            # Execute CALL trade (buy contract)
+            self.logger.info("Requesting price proposal for CALL trade")
+            call_proposal = await self.api_client.get_price_proposal(
+                symbol=symbol,
+                contract_type="CALL",
+                amount=size,
+                duration=1,
+                duration_unit="d"  # 1 day duration (since 5m is not supported)
+            )
+            
+            if not call_proposal or "id" not in call_proposal:
+                error_msg = "Failed to get price proposal for CALL trade"
+                self.logger.error(error_msg)
+                return False, error_msg
+                
+            proposal_id = call_proposal.get("id")
+            price = call_proposal.get("ask_price", 0)
+            
+            self.logger.info(f"Executing CALL trade with proposal ID: {proposal_id}, price: {price}")
+            call_result = await self.api_client.buy_contract(
+                proposal_id=proposal_id,
+                price=price
+            )
+            
+            if not call_result or "contract_id" not in call_result:
+                error_msg = f"CALL trade failed: {call_result.get('error_message', 'Unknown error')}"
+                self.logger.error(error_msg)
+                return False, error_msg
+                
+            call_contract_id = call_result.get("contract_id")
+            self.logger.info(f"CALL test trade executed: Contract ID {call_contract_id}")
+            
+            # Execute PUT trade
+            self.logger.info("Requesting price proposal for PUT trade")
+            put_proposal = await self.api_client.get_price_proposal(
+                symbol=symbol,
+                contract_type="PUT",
+                amount=size,
+                duration=1,
+                duration_unit="d"  # 1 day duration (since 5m is not supported)
+            )
+            
+            if not put_proposal or "id" not in put_proposal:
+                error_msg = "Failed to get price proposal for PUT trade"
+                self.logger.error(error_msg)
+                return False, error_msg
+                
+            proposal_id = put_proposal.get("id")
+            price = put_proposal.get("ask_price", 0)
+            
+            self.logger.info(f"Executing PUT trade with proposal ID: {proposal_id}, price: {price}")
+            put_result = await self.api_client.buy_contract(
+                proposal_id=proposal_id,
+                price=price
+            )
+            
+            if not put_result or "contract_id" not in put_result:
+                error_msg = f"PUT trade failed: {put_result.get('error_message', 'Unknown error')}"
+                self.logger.error(error_msg)
+                return False, error_msg
+                
+            put_contract_id = put_result.get("contract_id")
+            self.logger.info(f"PUT test trade executed: Contract ID {put_contract_id}")
+            
+            return True, f"Successfully executed test trades: CALL (ID: {call_contract_id}) and PUT (ID: {put_contract_id})"
+            
+        except Exception as e:
+            error_msg = f"Error executing test trades: {str(e)}"
+            self.logger.error(error_msg)
+            return False, error_msg
+    
     async def monitor_open_trades(self):
         """Monitor open trades for stop loss, take profit, or manual closing"""
         if not self.open_trades:
