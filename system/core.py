@@ -69,12 +69,13 @@ class TechnicalSignal:
     """Technical analysis signal data structure"""
     symbol: str
     timeframe: Union[str, Timeframe]
-    indicator: str
+    indicator: Union[str, Indicator]
     direction: Direction
-    confidence: Confidence
+    confidence: Union[float, Confidence]
     value: float
-    threshold: float
+    threshold: float = 0.0
     timestamp: Optional[str] = None
+    description: Optional[str] = None
     
     def __post_init__(self):
         """Convert fields to proper types after initialization"""
@@ -85,11 +86,30 @@ class TechnicalSignal:
                 # Keep as string if not matching any Timeframe enum
                 pass
         
+        if isinstance(self.indicator, str):
+            try:
+                self.indicator = Indicator(self.indicator)
+            except ValueError:
+                # Keep as string if not matching any Indicator enum
+                pass
+        
         if isinstance(self.direction, str):
             self.direction = Direction(self.direction)
             
         if isinstance(self.confidence, str):
             self.confidence = Confidence(self.confidence)
+        elif isinstance(self.confidence, float):
+            # Convert float confidence to enum (nearest match)
+            if self.confidence >= 0.9:
+                self.confidence = Confidence.VERY_HIGH
+            elif self.confidence >= 0.75:
+                self.confidence = Confidence.HIGH
+            elif self.confidence >= 0.5:
+                self.confidence = Confidence.MEDIUM
+            elif self.confidence >= 0.25:
+                self.confidence = Confidence.LOW
+            else:
+                self.confidence = Confidence.VERY_LOW
             
         if self.timestamp is None:
             self.timestamp = datetime.utcnow().isoformat()

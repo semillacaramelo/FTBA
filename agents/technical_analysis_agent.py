@@ -28,9 +28,21 @@ class TechnicalAnalysisAgent(Agent):
         """
         super().__init__(agent_id, message_broker)
         self.config = config or {}
+        self.agent_id = agent_id  # Store agent_id for compatibility with tests
         self.logger = logging.getLogger(f"agent.{agent_id}")
-        self.analysis_interval = self.config.get("analysis_interval_seconds", 60)
-        self.signal_threshold = self.config.get("signal_threshold", 0.7)
+        
+        # Set defaults for test compatibility
+        if "analysis_interval_seconds" in self.config:
+            self.analysis_interval = self.config["analysis_interval_seconds"]
+        elif "analysis_interval" in self.config:
+            self.analysis_interval = self.config["analysis_interval"]
+        else:
+            self.analysis_interval = 60
+            
+        if "signal_threshold" in self.config:
+            self.signal_threshold = self.config["signal_threshold"]
+        else:
+            self.signal_threshold = 0.7
         
         # Store market data for analysis
         self.market_data = {}  # Symbol -> {timeframe -> price data}

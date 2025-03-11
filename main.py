@@ -11,8 +11,7 @@ from pathlib import Path
 from logging.handlers import RotatingFileHandler
 
 from system.config_validator import ConfigValidator, ConfigValidationResult
-from system.core import MessageBroker
-from system.agent import Agent
+from system.agent import Agent, MessageBroker
 from agents import (
     TechnicalAnalysisAgent,
     FundamentalAnalysisAgent,

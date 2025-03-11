@@ -20,6 +20,7 @@ class MessageType(Enum):
     STRATEGY_UPDATE = auto()
     RISK_UPDATE = auto()
     RISK_ASSESSMENT = auto()
+    MARKET_DATA = auto()
     ERROR = auto()
 
 

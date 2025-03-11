@@ -708,18 +708,31 @@ class StrategyOptimizationAgent(Agent):
         """Load strategies from disk"""
         try:
             strategies_file = os.path.join("data", "performance", "strategies.json")
-            if os.path.exists(strategies_file):
-                with open(strategies_file, 'r') as f:
-                    self.strategies = json.load(f)
-                self.logger.info(f"Loaded {len(self.strategies)} strategies from disk")
+            if os.path.exists(strategies_file) and os.path.getsize(strategies_file) > 0:
+                try:
+                    with open(strategies_file, 'r') as f:
+                        self.strategies = json.load(f)
+                    self.logger.info(f"Loaded {len(self.strategies)} strategies from disk")
+                except json.JSONDecodeError as e:
+                    self.logger.warning(f"Corrupted strategies file: {e}. Will use defaults.")
+                    # Remove corrupted file
+                    os.remove(strategies_file)
             
             performance_file = os.path.join("data", "performance", "strategy_performance.json")
-            if os.path.exists(performance_file):
-                with open(performance_file, 'r') as f:
-                    self.strategy_performance = json.load(f)
-                self.logger.info(f"Loaded performance data for {len(self.strategy_performance)} strategies")
+            if os.path.exists(performance_file) and os.path.getsize(performance_file) > 0:
+                try:
+                    with open(performance_file, 'r') as f:
+                        self.strategy_performance = json.load(f)
+                    self.logger.info(f"Loaded performance data for {len(self.strategy_performance)} strategies")
+                except json.JSONDecodeError as e:
+                    self.logger.warning(f"Corrupted performance file: {e}. Starting with fresh data.")
+                    # Remove corrupted file
+                    os.remove(performance_file)
+                    self.strategy_performance = {}
         except Exception as e:
             self.logger.error(f"Error loading strategies: {e}")
+            # Initialize with defaults if loading fails
+            self._initialize_default_strategies()
     
     def _save_strategies(self):
         """Save strategies to disk"""

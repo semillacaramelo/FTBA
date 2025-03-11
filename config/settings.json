@@ -1,71 +1,37 @@
 {
   "system": {
     "log_level": "INFO",
-    "data_dir": "data",
-    "max_memory_mb": 256
+    "data_directory": "./data",
+    "backup_directory": "./backups"
+  },
+  "market_data": {
+    "provider": "simulation"
+  },
+  "risk_management": {
+    "max_account_risk_percent": 2.0,
+    "max_position_size_percent": 5.0,
+    "max_daily_loss_percent": 5.0
   },
   "agents": {
     "technical_analysis": {
-      "enabled": true,
-      "indicators": [
-        "moving_average",
-        "rsi",
-        "macd"
-      ],
-      "timeframes": [
-        "1h",
-        "4h",
-        "1d"
-      ],
-      "symbols": [
-        "EUR/USD",
-        "GBP/USD",
-        "USD/JPY"
-      ]
+      "analysis_interval_seconds": 60,
+      "signal_threshold": 0.7
     },
     "fundamental_analysis": {
-      "enabled": true,
-      "data_sources": [
-        "economic_calendar"
-      ],
-      "currencies": [
-        "EUR",
-        "USD",
-        "GBP",
-        "JPY"
-      ]
+      "update_interval_seconds": 300
     },
     "risk_management": {
-      "enabled": true,
-      "max_risk_per_trade": 0.02,
-      "max_total_risk": 0.1,
-      "max_correlated_risk": 0.05
+      "update_interval_seconds": 60
     },
     "strategy_optimization": {
-      "enabled": true,
-      "optimization_interval": 86400,
-      "learning_rate": 0.01
+      "update_interval_seconds": 300,
+      "learning_rate": 0.1
     },
     "trade_execution": {
-      "enabled": true,
-      "gateway_type": "deriv",
-      "api_key": "",
-      "use_demo_account": true
+      "check_interval_seconds": 1,
+      "slippage_model": "fixed",
+      "fixed_slippage_pips": 1.0,
+      "gateway_type": "simulation"
     }
-  },
-  "deriv_api": {
-    "app_id": "VW2ILcRli7jNOGp",
-    "endpoint": "wss://ws.binaryws.com/websockets/v3",
-    "account_type": "demo",
-    "symbols_mapping": {
-      "EUR/USD": "frxEURUSD",
-      "GBP/USD": "frxGBPUSD",
-      "USD/JPY": "frxUSDJPY",
-      "USD/CHF": "frxUSDCHF",
-      "AUD/USD": "frxAUDUSD"
-    },
-    "default_contract_type": "CALL/PUT",
-    "default_duration": 5,
-    "default_duration_unit": "m"
   }
 }

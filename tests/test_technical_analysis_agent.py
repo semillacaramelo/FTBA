@@ -73,9 +73,9 @@ class TestTechnicalAnalysisAgent(unittest.TestCase):
         }
         message = Message(
             msg_id="test1",
+            msg_type=MessageType.MARKET_DATA,
             sender="market_data",
             recipients=["test_technical"],
-            type=MessageType.MARKET_DATA,
             content=message_content
         )
         
@@ -134,11 +134,11 @@ class TestTechnicalAnalysisAgent(unittest.TestCase):
             }
         }
         
-        # Mock indicators to simulate a crossover
+        # Mock indicators to simulate a crossover and overbought RSI
         self.agent.indicators["EUR/USD"] = {
-            "SMA20": [1.1010, 1.1025, 1.1035],
-            "SMA50": [1.1030, 1.1020, 1.1010],
-            "RSI": [45, 55, 60]
+            "SMA20": [1.1000, 1.1025, 1.1035],  # Initially below SMA50, then above
+            "SMA50": [1.1020, 1.1020, 1.1020],  # Constant
+            "RSI": [45, 55, 75]  # Last value is >70, should trigger overbought signal
         }
         
         signals = self.agent._generate_signals("EUR/USD", "M5")
@@ -150,7 +150,8 @@ class TestTechnicalAnalysisAgent(unittest.TestCase):
         signal = signals[0]
         self.assertEqual(signal.symbol, "EUR/USD")
         self.assertEqual(signal.timeframe, "M5")
-        self.assertTrue(isinstance(signal.confidence, float))
+        self.assertTrue(isinstance(signal.confidence, (float, Confidence)), 
+                       f"Expected confidence to be float or Confidence enum, got {type(signal.confidence)}")
 
 if __name__ == '__main__':
     unittest.main()

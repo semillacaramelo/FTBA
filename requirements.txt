@@ -83,3 +83,17 @@ statsmodels
 tabulate
 websocket-client
 websockets
+numpy
+aiohttp
+numpy
+aiohttp
+numpy
+websockets
+aiohttp
+numpy
+aiohttp
+numpy
+pytest
+pytest-asyncio
+pytest
+pytest-asyncio
