@@ -737,17 +737,48 @@ class StrategyOptimizationAgent(Agent):
     def _save_strategies(self):
         """Save strategies to disk"""
         try:
+            # Serialize strategies with proper handling of Enum objects
+            strategies_serializable = self._prepare_for_serialization(self.strategies)
+            performance_serializable = self._prepare_for_serialization(self.strategy_performance)
+            
             strategies_file = os.path.join("data", "performance", "strategies.json")
             with open(strategies_file, 'w') as f:
-                json.dump(self.strategies, f, indent=2)
+                json.dump(strategies_serializable, f, indent=2)
             
             performance_file = os.path.join("data", "performance", "strategy_performance.json")
             with open(performance_file, 'w') as f:
-                json.dump(self.strategy_performance, f, indent=2)
+                json.dump(performance_serializable, f, indent=2)
                 
             self.logger.info(f"Saved {len(self.strategies)} strategies to disk")
         except Exception as e:
             self.logger.error(f"Error saving strategies: {e}")
+            
+    def _prepare_for_serialization(self, obj):
+        """
+        Prepare an object for JSON serialization by converting Enum objects to strings
+        
+        Args:
+            obj: Object to prepare
+            
+        Returns:
+            Serializable version of the object
+        """
+        if isinstance(obj, dict):
+            return {k: self._prepare_for_serialization(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._prepare_for_serialization(item) for item in obj]
+        elif isinstance(obj, Direction):
+            return obj.value
+        elif isinstance(obj, Confidence):
+            return obj.value
+        elif hasattr(obj, '__dict__'):
+            # Handle custom objects by converting to dict
+            serialized = {}
+            for attr, value in obj.__dict__.items():
+                serialized[attr] = self._prepare_for_serialization(value)
+            return serialized
+        else:
+            return obj
     
     def _save_strategy_performance(self, strategy_name: str, performance: Dict):
         """

@@ -5,7 +5,8 @@
     "backup_directory": "./backups"
   },
   "market_data": {
-    "provider": "simulation"
+    "provider": "simulation",
+    "symbols": ["EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD"]
   },
   "risk_management": {
     "max_account_risk_percent": 2.0,
@@ -27,11 +28,36 @@
       "update_interval_seconds": 300,
       "learning_rate": 0.1
     },
+    "asset_selection": {
+      "check_interval_seconds": 60,
+      "trading_hours_tolerance_minutes": 30,
+      "primary_assets": ["EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD"],
+      "fallback_assets": ["USD/CAD", "NZD/USD", "EUR/GBP"]
+    },
     "trade_execution": {
       "check_interval_seconds": 1,
       "slippage_model": "fixed",
       "fixed_slippage_pips": 1.0,
-      "gateway_type": "simulation"
+      "gateway_type": "deriv",
+      "use_demo_account": true
     }
+  },
+  "deriv_api": {
+    "app_id": "1089",
+    "endpoint": "wss://ws.binaryws.com/websockets/v3",
+    "account_type": "demo",
+    "symbols_mapping": {
+      "EUR/USD": "frxEURUSD",
+      "GBP/USD": "frxGBPUSD",
+      "USD/JPY": "frxUSDJPY",
+      "USD/CHF": "frxUSDCHF",
+      "AUD/USD": "frxAUDUSD",
+      "USD/CAD": "frxUSDCAD",
+      "NZD/USD": "frxNZDUSD",
+      "EUR/GBP": "frxEURGBP"
+    },
+    "default_contract_type": "CALL/PUT",
+    "default_duration": 5,
+    "default_duration_unit": "m"
   }
 }

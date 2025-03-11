@@ -1,0 +1,92 @@
+{
+  "trend_following": {
+    "description": "Follows established trends using moving average crossovers",
+    "symbols": [
+      "EUR/USD",
+      "GBP/USD",
+      "USD/JPY",
+      "USD/CHF",
+      "AUD/USD"
+    ],
+    "allowed_directions": [
+      "LONG",
+      "SHORT"
+    ],
+    "timeframes": [
+      "1h",
+      "4h",
+      "1d"
+    ],
+    "parameters": {
+      "fast_ma_period": 8,
+      "slow_ma_period": 21,
+      "confirmation_period": 3
+    },
+    "performance": {
+      "win_rate": 0.58,
+      "profit_factor": 1.7,
+      "sharpe_ratio": 1.2,
+      "max_drawdown": 0.15
+    }
+  },
+  "breakout": {
+    "description": "Trades breakouts from key support/resistance levels",
+    "symbols": [
+      "EUR/USD",
+      "GBP/USD",
+      "USD/JPY",
+      "USD/CHF",
+      "AUD/USD"
+    ],
+    "allowed_directions": [
+      "LONG",
+      "SHORT"
+    ],
+    "timeframes": [
+      "1h",
+      "4h"
+    ],
+    "parameters": {
+      "range_lookback_periods": 20,
+      "breakout_threshold": 0.001,
+      "volatility_filter": true
+    },
+    "performance": {
+      "win_rate": 0.45,
+      "profit_factor": 1.5,
+      "sharpe_ratio": 0.95,
+      "max_drawdown": 0.18
+    }
+  },
+  "mean_reversion": {
+    "description": "Trades mean reversion using RSI and Bollinger Bands",
+    "symbols": [
+      "EUR/USD",
+      "GBP/USD",
+      "USD/JPY",
+      "USD/CHF",
+      "AUD/USD"
+    ],
+    "allowed_directions": [
+      "LONG",
+      "SHORT"
+    ],
+    "timeframes": [
+      "15m",
+      "1h"
+    ],
+    "parameters": {
+      "rsi_period": 14,
+      "rsi_oversold": 30,
+      "rsi_overbought": 70,
+      "bb_period": 20,
+      "bb_std": 2.0
+    },
+    "performance": {
+      "win_rate": 0.62,
+      "profit_factor": 1.4,
+      "sharpe_ratio": 0.85,
+      "max_drawdown": 0.12
+    }
+  }
+}

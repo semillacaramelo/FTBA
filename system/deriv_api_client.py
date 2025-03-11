@@ -13,25 +13,102 @@ class DerivAPI:
         return {"ping": 1}
     
     async def active_symbols(self, **kwargs):
-        return {"active_symbols": []}
+        # Return some sample forex symbols for testing
+        return {
+            "active_symbols": [
+                {
+                    "symbol": "frxEURUSD",
+                    "display_name": "EUR/USD",
+                    "market": "forex",
+                    "market_display_name": "Forex"
+                },
+                {
+                    "symbol": "frxGBPUSD",
+                    "display_name": "GBP/USD",
+                    "market": "forex",
+                    "market_display_name": "Forex"
+                },
+                {
+                    "symbol": "frxUSDJPY",
+                    "display_name": "USD/JPY",
+                    "market": "forex",
+                    "market_display_name": "Forex"
+                }
+            ]
+        }
     
     async def proposal(self, **kwargs):
-        return {"proposal": {}}
+        # Mock proposal response with contract ID
+        return {
+            "proposal": {
+                "id": "mock_proposal_123",
+                "ask_price": 10.50,
+                "date_start": 0,
+                "date_expiry": 0,
+                "spot": 1.10532,
+                "spot_time": 0,
+                "payout": 19.05
+            }
+        }
     
     async def buy(self, **kwargs):
-        return {"buy": {}}
+        # Mock buy response
+        return {
+            "buy": {
+                "contract_id": "mock_contract_456",
+                "longcode": "Win payout if EUR/USD is strictly higher than entry spot after 5 minutes.",
+                "start_time": 0,
+                "transaction_id": "mock_transaction_789"
+            }
+        }
     
     async def proposal_open_contract(self, **kwargs):
-        return {"proposal_open_contract": {}}
+        # Mock proposal open contract
+        return {
+            "proposal_open_contract": {
+                "contract_id": kwargs.get("contract_id", "unknown"),
+                "status": "open",
+                "entry_spot": 1.10532,
+                "current_spot": 1.10982,
+                "profit": 5.25,
+                "profit_percentage": 50.0
+            }
+        }
     
     async def cancel(self, **kwargs):
-        return {"cancel": {}}
+        # Mock cancel response
+        return {
+            "cancel": {
+                "contract_id": kwargs.get("cancel", "unknown"),
+                "refund_amount": 9.25
+            }
+        }
     
     async def balance(self, **kwargs):
-        return {"balance": {}}
+        # Mock balance response
+        return {
+            "balance": {
+                "balance": 1000.00,
+                "currency": "USD",
+                "loginid": "MOCK123456",
+                "total": 1000.00
+            }
+        }
     
     async def ticks(self, **kwargs):
-        return {}
+        # Mock ticks response
+        symbol = kwargs.get("ticks", "unknown")
+        return {
+            "tick": {
+                "symbol": symbol,
+                "id": "mock_tick_1",
+                "quote": 1.10532,
+                "epoch": 0
+            },
+            "subscription": {
+                "id": "mock_sub_1"
+            }
+        }
 
 class ResponseError(Exception):
     """Mock response error class"""
@@ -73,7 +150,8 @@ class DerivApiClient:
             
             # In a real implementation, this would use the actual Deriv API
             # from deriv_api import DerivAPI
-            self.api = DerivAPI(app_id=self.app_id, endpoint=self.endpoint)
+            # Create a mock DerivAPI instance - our mock class doesn't take parameters
+            self.api = DerivAPI()
             
             # Validate connection with a ping
             ping_result = await self.ping()
@@ -318,3 +396,204 @@ class DerivApiClient:
         )
         
         return response
+    
+    async def get_current_price(self, symbol: str) -> Optional[float]:
+        """
+        Get the current price for a symbol
+        
+        Args:
+            symbol: Trading symbol (e.g., "frxEURUSD")
+            
+        Returns:
+            float: Current market price or None if not available
+        """
+        # Map standard symbol format to Deriv format if needed
+        deriv_symbol = self._map_to_deriv_symbol(symbol)
+        
+        # Get tick data for the symbol
+        response = await self.get_ticks(deriv_symbol)
+        
+        # Check if response contains valid price data
+        if "error" in response:
+            self.logger.error(f"Error getting current price for {symbol}: {response.get('error')}")
+            return None
+            
+        # Extract price from tick data
+        tick = response.get("tick", {})
+        if not tick:
+            self.logger.warning(f"No tick data available for {symbol}")
+            return None
+            
+        # Return the current quote
+        return tick.get("quote")
+    
+    async def place_order(self, symbol: str, direction: str, size: float,
+                         order_type: str, price: Optional[float] = None,
+                         stop_loss: Optional[float] = None,
+                         take_profit: Optional[float] = None) -> Dict:
+        """
+        Place a trading order
+        
+        Args:
+            symbol: Trading symbol
+            direction: Trade direction (LONG/SHORT)
+            size: Trade size (stake amount)
+            order_type: Order type (MARKET, LIMIT, etc.)
+            price: Limit price (for LIMIT orders)
+            stop_loss: Stop loss price
+            take_profit: Take profit price
+            
+        Returns:
+            Dict: Order execution result
+        """
+        try:
+            # Map standard symbol format to Deriv format
+            deriv_symbol = self._map_to_deriv_symbol(symbol)
+            
+            # Determine contract type based on direction
+            contract_type = "CALL" if direction == "LONG" else "PUT"
+            
+            # Default duration (we'll use 5 minutes for now, but this should come from config)
+            duration = 5
+            duration_unit = "m"
+            
+            # Get price proposal first
+            proposal_response = await self.get_price_proposal(
+                symbol=deriv_symbol,
+                contract_type=contract_type,
+                amount=size,
+                duration=duration,
+                duration_unit=duration_unit
+            )
+            
+            if not proposal_response or "id" not in proposal_response:
+                return {
+                    "success": False,
+                    "error": f"Failed to get price proposal for {symbol}"
+                }
+                
+            # Extract proposal ID and price
+            proposal_id = proposal_response.get("id")
+            proposal_price = proposal_response.get("ask_price")
+            
+            # Execute the contract purchase
+            purchase_response = await self.buy_contract(
+                proposal_id=proposal_id,
+                price=proposal_price
+            )
+            
+            if not purchase_response or "contract_id" not in purchase_response:
+                return {
+                    "success": False,
+                    "error": f"Failed to execute contract purchase for {symbol}"
+                }
+                
+            # Extract contract details
+            contract_id = purchase_response.get("contract_id")
+            
+            # Return success response with contract details
+            return {
+                "success": True,
+                "order_id": contract_id,
+                "executed_price": proposal_response.get("spot"),
+                "executed_size": size
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error placing order for {symbol}: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    async def close_order(self, symbol: str, order_id: str, size: float) -> Dict:
+        """
+        Close an open order/contract
+        
+        Args:
+            symbol: Trading symbol
+            order_id: Order ID to close
+            size: Size to close (not used in Deriv API, full contract is closed)
+            
+        Returns:
+            Dict: Order closure result
+        """
+        try:
+            # In Deriv API, we use contract_id to cancel/sell back the contract
+            cancel_response = await self.cancel_contract(contract_id=order_id)
+            
+            if not cancel_response or "contract_id" not in cancel_response:
+                # Try to get the current contract state
+                contract_update = await self.get_contract_update(contract_id=order_id)
+                
+                if "error" in contract_update:
+                    return {
+                        "success": False,
+                        "error": f"Failed to close contract {order_id}: {contract_update.get('error')}"
+                    }
+                
+                # Check if contract is already closed or expired
+                status = contract_update.get("status", "")
+                if status in ["sold", "expired"]:
+                    return {
+                        "success": True,
+                        "executed_price": contract_update.get("sell_price", 0),
+                        "message": f"Contract was already {status}"
+                    }
+                
+                return {
+                    "success": False,
+                    "error": f"Failed to close contract {order_id}"
+                }
+            
+            # Return success response with contract details
+            return {
+                "success": True,
+                "order_id": order_id,
+                "executed_price": cancel_response.get("sell_price", 0),
+                "refund_amount": cancel_response.get("refund_amount", 0)
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error closing order {order_id} for {symbol}: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    def _map_to_deriv_symbol(self, symbol: str) -> str:
+        """
+        Map standard symbol format (e.g., EUR/USD) to Deriv format (e.g., frxEURUSD)
+        
+        Args:
+            symbol: Standard symbol name
+            
+        Returns:
+            str: Deriv symbol name
+        """
+        # Simple mapping for common forex pairs
+        symbol_map = {
+            "EUR/USD": "frxEURUSD",
+            "GBP/USD": "frxGBPUSD",
+            "USD/JPY": "frxUSDJPY",
+            "USD/CHF": "frxUSDCHF",
+            "AUD/USD": "frxAUDUSD",
+            "NZD/USD": "frxNZDUSD",
+            "EUR/GBP": "frxEURGBP",
+            "EUR/JPY": "frxEURJPY",
+            "GBP/JPY": "frxGBPJPY"
+        }
+        
+        # Check if symbol already in Deriv format
+        if symbol.startswith("frx"):
+            return symbol
+        
+        # Remove any spaces
+        clean_symbol = symbol.replace(" ", "")
+        
+        # Check if in mapping
+        if clean_symbol in symbol_map:
+            return symbol_map[clean_symbol]
+        
+        # Default case - prepend "frx" and remove "/"
+        return f"frx{clean_symbol.replace('/', '')}"

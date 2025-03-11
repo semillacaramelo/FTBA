@@ -17,7 +17,8 @@ from agents import (
     FundamentalAnalysisAgent,
     RiskManagementAgent,
     StrategyOptimizationAgent,
-    TradeExecutionAgent
+    TradeExecutionAgent,
+    AssetSelectionAgent
 )
 from system.error_handling import setup_error_handling
 from system.config_validator import validate_configuration
@@ -48,46 +49,67 @@ async def initialize_agents(config: Dict, message_broker: MessageBroker) -> Dict
 
     # Technical Analysis Agent
     if "technical_analysis" in config.get("agents", {}):
+        agent_config = config["agents"]["technical_analysis"]
+        agent_config["parent_config"] = config  # Pass the full config
         technical_agent = TechnicalAnalysisAgent(
             agent_id="technical_analysis",
             message_broker=message_broker,
-            config=config["agents"]["technical_analysis"]
+            config=agent_config
         )
         agents["technical_analysis"] = technical_agent
 
     # Fundamental Analysis Agent
     if "fundamental_analysis" in config.get("agents", {}):
+        agent_config = config["agents"]["fundamental_analysis"]
+        agent_config["parent_config"] = config  # Pass the full config
         fundamental_agent = FundamentalAnalysisAgent(
             agent_id="fundamental_analysis",
             message_broker=message_broker,
-            config=config["agents"]["fundamental_analysis"]
+            config=agent_config
         )
         agents["fundamental_analysis"] = fundamental_agent
 
     # Risk Management Agent
     if "risk_management" in config.get("agents", {}):
+        agent_config = config["agents"]["risk_management"]
+        agent_config["parent_config"] = config  # Pass the full config
         risk_agent = RiskManagementAgent(
             agent_id="risk_management",
             message_broker=message_broker,
-            config=config["agents"]["risk_management"]
+            config=agent_config
         )
         agents["risk_management"] = risk_agent
 
     # Strategy Optimization Agent
     if "strategy_optimization" in config.get("agents", {}):
+        agent_config = config["agents"]["strategy_optimization"]
+        agent_config["parent_config"] = config  # Pass the full config
         strategy_agent = StrategyOptimizationAgent(
             agent_id="strategy_optimization",
             message_broker=message_broker,
-            config=config["agents"]["strategy_optimization"]
+            config=agent_config
         )
         agents["strategy_optimization"] = strategy_agent
+    
+    # Asset Selection Agent
+    if "asset_selection" in config.get("agents", {}):
+        agent_config = config["agents"]["asset_selection"].copy()  # Make a copy to avoid modifying original
+        agent_config["parent_config"] = config  # Pass the full config
+        asset_selection_agent = AssetSelectionAgent(
+            agent_id="asset_selection",
+            message_broker=message_broker,
+            config=agent_config
+        )
+        agents["asset_selection"] = asset_selection_agent
 
     # Trade Execution Agent
     if "trade_execution" in config.get("agents", {}):
+        agent_config = config["agents"]["trade_execution"].copy()  # Make a copy to avoid modifying original
+        agent_config["parent_config"] = config  # Pass the full config
         execution_agent = TradeExecutionAgent(
             agent_id="trade_execution",
             message_broker=message_broker,
-            config=config["agents"]["trade_execution"]
+            config=agent_config
         )
         agents["trade_execution"] = execution_agent
 

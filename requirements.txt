@@ -97,3 +97,6 @@ pytest
 pytest-asyncio
 pytest
 pytest-asyncio
+aiohttp
+nest-asyncio
+websockets

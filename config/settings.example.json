@@ -43,6 +43,12 @@
       "update_interval_seconds": 300,
       "learning_rate": 0.1
     },
+    "asset_selection": {
+      "check_interval_seconds": 60,
+      "trading_hours_tolerance_minutes": 30,
+      "primary_assets": ["EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD"],
+      "fallback_assets": ["USD/CAD", "NZD/USD", "EUR/GBP"]
+    },
     "trade_execution": {
       "check_interval_seconds": 1,
       "slippage_model": "fixed",

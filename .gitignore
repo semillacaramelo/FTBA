@@ -26,9 +26,29 @@ logs/
 
 # Data
 data/storage/
+data/historical/
+*.csv
+*.pickle
+*.h5
 
 # Config
 config/config.yaml
+config/settings_prod.json
+config/api_keys.json
+config/*.env
+.env
+
+# Credentials and Secrets
+*_credentials.json
+*_api_key.txt
+*.pem
+*.key
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+data/database/
 
 # Virtual Environment
 venv/
@@ -43,3 +63,8 @@ env/
 # OS specific
 .DS_Store
 Thumbs.db
+
+# Generated files
+generated_*.py
+temp/
+cache/

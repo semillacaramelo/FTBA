@@ -100,6 +100,20 @@ class ConfigValidator:
                 "max_position_size_percent": {"type": "float", "min": 0.1, "max": 20.0, "default": 5.0},
                 "max_daily_loss_percent": {"type": "float", "min": 1.0, "max": 20.0, "default": 5.0}
             },
+            "deriv_api": {
+                "app_id": {"type": "str", "default": "1089"},
+                "endpoint": {"type": "str", "default": "wss://ws.binaryws.com/websockets/v3"},
+                "account_type": {"type": "str", "choices": ["demo", "real"], "default": "demo"},
+                "symbols_mapping": {"type": "dict", "default": {
+                    "EUR/USD": "frxEURUSD",
+                    "GBP/USD": "frxGBPUSD",
+                    "USD/JPY": "frxUSDJPY",
+                    "USD/CHF": "frxUSDCHF"
+                }},
+                "default_contract_type": {"type": "str", "default": "CALL/PUT"},
+                "default_duration": {"type": "int", "min": 1, "max": 60, "default": 5},
+                "default_duration_unit": {"type": "str", "choices": ["t", "s", "m", "h", "d"], "default": "m"}
+            },
             "agents": {
                 "technical_analysis": {
                     "analysis_interval_seconds": {"type": "int", "min": 10, "max": 3600, "default": 60},
@@ -115,11 +129,18 @@ class ConfigValidator:
                     "update_interval_seconds": {"type": "int", "min": 60, "max": 3600, "default": 300},
                     "learning_rate": {"type": "float", "min": 0.01, "max": 0.5, "default": 0.1}
                 },
+                "asset_selection": {
+                    "check_interval_seconds": {"type": "int", "min": 10, "max": 600, "default": 60},
+                    "trading_hours_tolerance_minutes": {"type": "int", "min": 0, "max": 120, "default": 30},
+                    "primary_assets": {"type": "list", "default": ["EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD"]},
+                    "fallback_assets": {"type": "list", "default": ["USD/CAD", "NZD/USD", "EUR/GBP"]}
+                },
                 "trade_execution": {
                     "check_interval_seconds": {"type": "int", "min": 1, "max": 60, "default": 1},
                     "slippage_model": {"type": "str", "choices": ["fixed", "proportional"], "default": "fixed"},
                     "fixed_slippage_pips": {"type": "float", "min": 0.1, "max": 10.0, "default": 1.0},
-                    "gateway_type": {"type": "str", "choices": ["simulation", "deriv", "oanda"], "default": "simulation"}
+                    "gateway_type": {"type": "str", "choices": ["simulation", "deriv", "oanda"], "default": "simulation"},
+                    "use_demo_account": {"type": "bool", "default": True}
                 }
             }
         }
@@ -212,6 +233,9 @@ class ConfigValidator:
             return
         elif expected_type == "list" and not isinstance(value, list):
             result.add_error(path, f"Expected list, got {type(value).__name__}")
+            return
+        elif expected_type == "dict" and not isinstance(value, dict):
+            result.add_error(path, f"Expected dictionary, got {type(value).__name__}")
             return
         
         # Constraints validation

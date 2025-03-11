@@ -45,6 +45,12 @@ class TradeExecutionAgent(Agent):
         self.open_trades = {}  # trade_id -> trade details
         self.trade_history = {}  # trade_id -> trade history
         
+        # Available assets
+        self.available_assets = []  # List of available assets
+        self.recommended_assets = []  # List of recommended assets from asset selection agent
+        self.last_asset_check_time = datetime.utcnow() - timedelta(minutes=10)  # Force initial check
+        self.asset_check_interval = self.config.get("asset_check_interval_seconds", 300)  # Default 5 mins
+        
         # API client (will be initialized in setup)
         self.api_client = None
         
@@ -64,11 +70,21 @@ class TradeExecutionAgent(Agent):
         
         # Initialize API client based on gateway type
         if self.gateway_type == "deriv":
+            # Get the deriv_api configuration from the main config or the parent_config
+            deriv_config = {}
+            if "parent_config" in self.config:
+                parent_config = self.config.get("parent_config", {})
+                deriv_config = parent_config.get("deriv_api", {})
+            
+            app_id = deriv_config.get("app_id", "1089")  # Default app_id
+            endpoint = deriv_config.get("endpoint", "wss://ws.binaryws.com/websockets/v3")
+            
+            self.logger.info(f"Initializing Deriv API client with app_id: {app_id}")
+            
             from system.deriv_api_client import DerivApiClient
             self.api_client = DerivApiClient(
-                app_id=self.config.get("app_id", ""),
-                use_demo=self.use_demo_account,
-                config=self.config
+                app_id=app_id,
+                endpoint=endpoint
             )
             await self.api_client.connect()
         else:
@@ -103,6 +119,10 @@ class TradeExecutionAgent(Agent):
         # Check if it's time to update
         current_time = datetime.utcnow()
         if (current_time - self.last_processed_time).total_seconds() >= self.check_interval:
+            # Check if we need to refresh available assets
+            if (current_time - self.last_asset_check_time).total_seconds() >= self.asset_check_interval:
+                await self.request_available_assets()
+            
             # Process approved proposals
             await self.process_approved_proposals()
             
@@ -111,6 +131,24 @@ class TradeExecutionAgent(Agent):
             
             # Update the last processed time
             self.last_processed_time = current_time
+            
+    async def request_available_assets(self):
+        """Request available assets from the Asset Selection Agent"""
+        self.logger.info("Requesting available assets from Asset Selection Agent")
+        
+        # Send a request message to the Asset Selection Agent
+        await self.send_message(
+            msg_type=MessageType.SYSTEM_STATUS,
+            content={
+                "event": "asset_availability_request",
+                "requester": self.id,  # Using self.id which is the agent identifier from the base class
+                "timestamp": datetime.utcnow().isoformat()
+            },
+            recipients=["asset_selection"]  # Specifically target the Asset Selection Agent
+        )
+        
+        # Update the last check time (even if we don't get a response immediately)
+        self.last_asset_check_time = datetime.utcnow()
         
         # Sleep to prevent CPU spinning
         await asyncio.sleep(self.check_interval)
@@ -124,6 +162,30 @@ class TradeExecutionAgent(Agent):
         elif message.type == MessageType.MARKET_DATA:
             # Update market prices (for simulation or monitoring)
             await self.handle_market_data(message)
+            
+        elif message.type == MessageType.SYSTEM_STATUS:
+            # Handle system status messages
+            await self.handle_system_status(message)
+            
+    async def handle_system_status(self, message: Message):
+        """
+        Handle system status messages
+        
+        Args:
+            message: Message containing system status
+        """
+        event = message.content.get("event")
+        
+        if event == "asset_availability_update" or event == "asset_availability_response":
+            # Update available assets
+            self.available_assets = message.content.get("available_assets", [])
+            self.recommended_assets = message.content.get("recommended_assets", [])
+            
+            available_count = len(self.available_assets)
+            recommended_count = len(self.recommended_assets)
+            
+            self.logger.info(f"Updated asset availability: {available_count} available, {recommended_count} recommended")
+            self.last_asset_check_time = datetime.utcnow()
     
     async def handle_trade_approval(self, message: Message):
         """
@@ -211,6 +273,29 @@ class TradeExecutionAgent(Agent):
         if not self.api_client:
             self.logger.error("API client not initialized")
             return None
+        
+        # Check if the symbol is available for trading
+        if self.available_assets and proposal.symbol not in self.available_assets:
+            self.logger.warning(f"Symbol {proposal.symbol} is currently unavailable for trading")
+            
+            # See if there is a recommended alternative
+            if self.recommended_assets:
+                fallback_symbol = None
+                for symbol in self.recommended_assets:
+                    # Find a symbol that is similar (has the same base currency)
+                    if proposal.symbol.split("/")[0] in symbol:
+                        fallback_symbol = symbol
+                        break
+                
+                if fallback_symbol:
+                    self.logger.info(f"Using alternative symbol {fallback_symbol} instead of {proposal.symbol}")
+                    proposal.symbol = fallback_symbol
+                else:
+                    self.logger.error(f"No suitable alternative symbol found for {proposal.symbol}")
+                    return None
+            else:
+                self.logger.error(f"No alternative symbols available")
+                return None
         
         # Generate execution ID
         execution_id = f"exec_{uuid.uuid4().hex[:8]}_{datetime.utcnow().strftime('%H%M%S')}"

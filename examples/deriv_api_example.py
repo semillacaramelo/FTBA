@@ -10,6 +10,11 @@ python examples/deriv_api_example.py --app_id YOUR_APP_ID
 import argparse
 import asyncio
 import logging
+import sys
+import os
+
+# Add the parent directory to sys.path to allow imports from the system module
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from system.deriv_api_client import DerivApiClient
 
 logging.basicConfig(
