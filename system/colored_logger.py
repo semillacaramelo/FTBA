@@ -181,7 +181,11 @@ def get_colored_logger(name: str) -> logging.Logger:
         logger.removeHandler(handler)
     
     # Add our custom handler if not already set up at the root
-    if not logger.parent.handlers or not any(isinstance(h, ColoredStreamHandler) for h in logger.parent.handlers):
+    parent_has_handler = False
+    if logger.parent and hasattr(logger.parent, 'handlers'):
+        parent_has_handler = any(isinstance(h, ColoredStreamHandler) for h in logger.parent.handlers)
+    
+    if not parent_has_handler:
         handler = ColoredStreamHandler()
         logger.addHandler(handler)
     
