@@ -5,10 +5,10 @@ import numpy as np
 import pandas as pd
 import uuid
 
-from system.agent import Agent
+from system.agent import Agent, Message, MessageType
 from system.core import (
-    Message, MessageType, Direction, Confidence,
-    TradeProposal, TradeStatus, TechnicalSignal, FundamentalUpdate
+    Direction, Confidence,
+    TradeProposal, TechnicalSignal, FundamentalUpdate
 )
 
 class StrategyOptimizationAgent(Agent):

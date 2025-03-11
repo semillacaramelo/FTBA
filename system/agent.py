@@ -47,6 +47,7 @@ class MessageBroker:
         self.queues = {}       # agent_id -> asyncio.Queue
         self.logger = logging.getLogger("message_broker")
         self.message_counter = 0
+        self._subscribers_cache = {}  # Cached set of subscribers for each message type
     
     def register_agent(self, agent_id: str) -> asyncio.Queue:
         """Register an agent and return its message queue"""
@@ -77,6 +78,9 @@ class MessageBroker:
                 self.subscribers[msg_type] = set()
             
             self.subscribers[msg_type].add(agent_id)
+            # Invalidate cache for this message type
+            if msg_type in self._subscribers_cache:
+                del self._subscribers_cache[msg_type]
         
         self.logger.debug(f"Agent {agent_id} subscribed to {[mt.name for mt in message_types]}")
     
@@ -85,6 +89,9 @@ class MessageBroker:
         for msg_type in message_types:
             if msg_type in self.subscribers and agent_id in self.subscribers[msg_type]:
                 self.subscribers[msg_type].remove(agent_id)
+                # Invalidate cache for this message type
+                if msg_type in self._subscribers_cache:
+                    del self._subscribers_cache[msg_type]
         
         self.logger.debug(f"Agent {agent_id} unsubscribed from {[mt.name for mt in message_types]}")
     
@@ -101,7 +108,11 @@ class MessageBroker:
         
         # Otherwise, send to all subscribers of this message type
         if message.type in self.subscribers:
-            for agent_id in self.subscribers[message.type]:
+            # Use cached subscribers if available
+            if message.type not in self._subscribers_cache:
+                self._subscribers_cache[message.type] = set(self.subscribers[message.type])
+            
+            for agent_id in self._subscribers_cache[message.type]:
                 if agent_id != message.sender and agent_id in self.queues:  # Don't send to self
                     await self.queues[agent_id].put(message)
         
@@ -184,15 +195,23 @@ class Agent(ABC):
         """Main processing loop for the agent"""
         try:
             while self.running:
-                # Process messages
-                while not self.message_queue.empty():
+                # Process messages (up to 10 at a time for efficiency)
+                messages_processed = 0
+                max_batch_size = 10
+                
+                while not self.message_queue.empty() and messages_processed < max_batch_size:
                     message = await self.message_queue.get()
                     try:
                         await self.handle_message(message)
+                        messages_processed += 1
                     except Exception as e:
                         self.logger.error(f"Error handling message {message}: {e}")
                     finally:
                         self.message_queue.task_done()
+                
+                # If no messages were processed, avoid CPU spinning
+                if messages_processed == 0:
+                    await asyncio.sleep(0.01)
                 
                 # Run agent-specific processing
                 try:

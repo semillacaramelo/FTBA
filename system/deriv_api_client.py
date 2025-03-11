@@ -50,7 +50,16 @@ class DerivApiClient:
             return 'ping' in response
         except Exception as e:
             self.logger.error(f"Ping failed: {e}")
+            self.connected = False
             return False
+            
+    async def ensure_connected(self) -> bool:
+        """Ensure the API client is connected, reconnect if necessary"""
+        if self.connected and await self.ping():
+            return True
+        
+        # Try to reconnect
+        return await self.connect()
     
     async def get_active_symbols(self, market_type: str = "forex") -> List[Dict]:
         """Get available symbols for trading"""

@@ -36,7 +36,7 @@ def setup_logging(config: Dict) -> logging.Logger:
     
     return logging.getLogger("main")
 
-async def initialize_agents(config: Dict, message_broker) -> Dict:
+async def initialize_agents(config: Dict, message_broker: MessageBroker) -> Dict[str, Agent]:
     """Initialize all agents based on configuration"""
     agents = {}
     
@@ -207,11 +207,10 @@ def main():
         if sys.platform == 'win32':
             asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
         asyncio.run(run_system(config))
-    except KeyboardInterrupt:
-        logger.info("Manual interrupt received. Shutting down...")
     except Exception as e:
-        logger.error(f"Critical error: {e}")
-        sys.exit(1)
+        if not isinstance(e, KeyboardInterrupt):
+            logger.error(f"Critical error: {e}")
+            sys.exit(1)
 
 if __name__ == "__main__":
     main()

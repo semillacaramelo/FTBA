@@ -3,9 +3,9 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 import uuid
 
-from system.agent import Agent
+from system.agent import Agent, Message, MessageType
 from system.core import (
-    Message, MessageType, Direction, TradeStatus,
+    Direction, Confidence,
     TradeProposal, TradeExecution
 )
 

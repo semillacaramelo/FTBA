@@ -3,10 +3,10 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 import numpy as np
 
-from system.agent import Agent
+from system.agent import Agent, Message, MessageType
 from system.core import (
-    Message, MessageType, Direction, TradeStatus,
-    TradeProposal, RiskAssessment, TechnicalSignal
+    Direction, Confidence, 
+    TradeProposal, TechnicalSignal
 )
 
 class RiskManagementAgent(Agent):
