@@ -1,489 +1,562 @@
+
 import asyncio
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
+import logging
 import uuid
 
 from system.agent import Agent, Message, MessageType
 from system.core import (
-    Direction, Confidence,
-    TradeProposal, TradeExecution
+    Direction, TradeStatus,
+    TradeProposal, TradeExecution, TradeResult
 )
+from system.deriv_api_client import DerivApiClient
 
 class TradeExecutionAgent(Agent):
-    def __init__(self, agent_id: str, message_broker, config):
-        super().__init__(agent_id, message_broker)
-        self.config = config
-        self.pending_trades = {}  # proposal_id -> trade proposal
-        self.active_trades = {}  # execution_id -> trade details
-        self.market_data = {}  # symbol -> latest market data
-        self.execution_gateway = None  # Trading gateway interface
-        self.check_interval = config.get("check_interval_seconds", 1)  # 1 second
-        self.slippage_model = config.get("slippage_model", "fixed")  # fixed or proportional
-        self.fixed_slippage_pips = config.get("fixed_slippage_pips", 1.0)  # 1 pip
-        self.proportional_slippage = config.get("proportional_slippage", 0.0001)  # 0.01%
+    """
+    Agent responsible for managing order submission, monitoring open positions,
+    and handling the trade lifecycle.
+    """
+    
+    def __init__(self, agent_id: str, message_broker, config: Dict = None):
+        """
+        Initialize the Trade Execution Agent
         
+        Args:
+            agent_id: Unique identifier for the agent
+            message_broker: Message broker for communication
+            config: Agent configuration dictionary
+        """
+        super().__init__(agent_id, message_broker)
+        self.config = config or {}
+        self.logger = logging.getLogger(f"agent.{agent_id}")
+        self.check_interval = self.config.get("check_interval_seconds", 1)
+        
+        # Trading parameters
+        self.slippage_model = self.config.get("slippage_model", "fixed")
+        self.fixed_slippage_pips = self.config.get("fixed_slippage_pips", 1.0)
+        
+        # Determine which gateway to use
+        self.gateway_type = self.config.get("gateway_type", "simulation")
+        self.use_demo_account = self.config.get("use_demo_account", True)
+        
+        # Trading state
+        self.approved_proposals = {}  # proposal_id -> proposal
+        self.open_trades = {}  # trade_id -> trade details
+        self.trade_history = {}  # trade_id -> trade history
+        
+        # API client (will be initialized in setup)
+        self.api_client = None
+        
+        # Last processed time
+        self.last_processed_time = datetime.utcnow()
+    
     async def setup(self):
-        """Set up the agent when starting"""
+        """Initialize the agent"""
+        self.logger.info("Setting up Trade Execution Agent")
+        
+        # Subscribe to relevant message types
         await self.subscribe_to([
-            MessageType.RISK_ASSESSMENT,
-            MessageType.SYSTEM_STATUS
+            MessageType.SYSTEM_STATUS,
+            MessageType.TRADE_APPROVAL,
+            MessageType.MARKET_DATA
         ])
-        await self.initialize_execution_gateway()
-        self.logger.info("Trade Execution Agent setup complete.")
+        
+        # Initialize API client based on gateway type
+        if self.gateway_type == "deriv":
+            from system.deriv_api_client import DerivApiClient
+            self.api_client = DerivApiClient(
+                app_id=self.config.get("app_id", ""),
+                use_demo=self.use_demo_account,
+                config=self.config
+            )
+            await self.api_client.connect()
+        else:
+            # Use simulation mode
+            self.api_client = SimulationGateway(
+                symbols=self.config.get("symbols", ["EUR/USD"]),
+                config=self.config
+            )
+            await self.api_client.connect()
+        
+        self.logger.info(f"Connected to {self.gateway_type} gateway")
     
     async def cleanup(self):
-        """Clean up when agent is stopping"""
-        # Close any pending trades
-        for proposal_id, proposal in list(self.pending_trades.items()):
-            await self.cancel_trade(proposal_id, "Agent shutting down")
+        """Clean up resources"""
+        self.logger.info("Cleaning up Trade Execution Agent")
         
-        # Disconnect from trading gateway
-        if self.execution_gateway:
-            await self.execution_gateway.disconnect()
+        # Close all open trades
+        if self.open_trades:
+            self.logger.info(f"Closing {len(self.open_trades)} open trades")
+            for trade_id in list(self.open_trades.keys()):
+                try:
+                    await self.close_trade(trade_id, "System shutdown")
+                except Exception as e:
+                    self.logger.error(f"Error closing trade {trade_id}: {e}")
         
-        self.logger.info("Trade Execution Agent cleaned up")
+        # Disconnect API client
+        if self.api_client:
+            await self.api_client.disconnect()
     
     async def process_cycle(self):
-        """Process a single cycle of the agent's main loop"""
-        # Check pending trades for expiry or execution
-        await self.process_pending_trades()
+        """Main processing cycle"""
+        # Check if it's time to update
+        current_time = datetime.utcnow()
+        if (current_time - self.last_processed_time).total_seconds() >= self.check_interval:
+            # Process approved proposals
+            await self.process_approved_proposals()
+            
+            # Monitor open trades
+            await self.monitor_open_trades()
+            
+            # Update the last processed time
+            self.last_processed_time = current_time
         
-        # Check active trades for stop loss, take profit, or trailing stop adjustment
-        await self.monitor_active_trades()
-        
-        # Sleep to maintain the desired update frequency
+        # Sleep to prevent CPU spinning
         await asyncio.sleep(self.check_interval)
     
     async def handle_message(self, message: Message):
         """Handle incoming messages"""
-        if message.type == MessageType.RISK_ASSESSMENT:
-            # Process risk assessment and execute trades if approved
-            proposal = message.content.get("proposal")
-            approved = message.content.get("approved", False)
+        if message.type == MessageType.TRADE_APPROVAL:
+            # Store approved trade proposal
+            await self.handle_trade_approval(message)
+        
+        elif message.type == MessageType.MARKET_DATA:
+            # Update market prices (for simulation or monitoring)
+            await self.handle_market_data(message)
+    
+    async def handle_trade_approval(self, message: Message):
+        """
+        Handle trade approval message
+        
+        Args:
+            message: Message containing trade approval
+        """
+        proposal_id = message.content.get("proposal_id")
+        adjusted_proposal = message.content.get("adjusted_proposal")
+        
+        if not proposal_id or not adjusted_proposal:
+            return
+        
+        # Store the approved proposal
+        self.approved_proposals[proposal_id] = adjusted_proposal
+        self.logger.info(f"Received approval for trade proposal {proposal_id}")
+    
+    async def handle_market_data(self, message: Message):
+        """
+        Handle market data update
+        
+        Args:
+            message: Message containing market data
+        """
+        data = message.content
+        if not data:
+            return
+        
+        # Update API client with market data (for simulation)
+        if hasattr(self.api_client, 'update_market_data'):
+            await self.api_client.update_market_data(data)
+    
+    async def process_approved_proposals(self):
+        """Process approved trade proposals and execute trades"""
+        if not self.approved_proposals:
+            return
+        
+        # Get proposals to process
+        proposals_to_process = list(self.approved_proposals.items())
+        
+        # Process each proposal
+        for proposal_id, proposal_data in proposals_to_process:
+            try:
+                # Convert to TradeProposal object if needed
+                if isinstance(proposal_data, dict):
+                    proposal = TradeProposal(**proposal_data)
+                else:
+                    proposal = proposal_data
+                
+                # Execute the trade
+                execution_result = await self.execute_trade(proposal)
+                
+                # Remove from approved proposals
+                del self.approved_proposals[proposal_id]
+                
+                # Send execution notification
+                if execution_result:
+                    await self.send_message(
+                        MessageType.TRADE_EXECUTION,
+                        {
+                            "execution": execution_result.__dict__,
+                            "timestamp": datetime.utcnow().isoformat()
+                        }
+                    )
+                    self.logger.info(f"Executed trade for proposal {proposal_id}")
             
-            if proposal and approved:
-                await self.handle_approved_trade(proposal)
-        
-        elif message.type == MessageType.SYSTEM_STATUS:
-            # Check for risk alerts or system status changes
-            if message.content.get("alert") == "RISK_ALERT":
-                # If there's a serious risk alert, cancel pending trades
-                risk_message = message.content.get("message", "")
-                if "threshold breached" in risk_message:
-                    await self.cancel_all_pending_trades("Risk threshold breached")
+            except Exception as e:
+                self.logger.error(f"Error executing trade for proposal {proposal_id}: {e}")
+                
+                # Remove from approved proposals after a few retries
+                # In a real system, we would implement retry logic here
+                del self.approved_proposals[proposal_id]
     
-    async def initialize_execution_gateway(self):
-        """Initialize connection to trading gateway"""
-        # In a real system, this would connect to an actual trading API
-        # For this prototype, we'll use a simulated gateway
-        gateway_type = self.config.get("gateway_type", "simulation")
+    async def execute_trade(self, proposal: TradeProposal) -> Optional[TradeExecution]:
+        """
+        Execute a trade based on the proposal
         
-        if gateway_type == "simulation":
-            self.execution_gateway = SimulatedTradingGateway(
-                slippage_model=self.slippage_model,
-                fixed_slippage_pips=self.fixed_slippage_pips,
-                proportional_slippage=self.proportional_slippage,
-                logger=self.logger
+        Args:
+            proposal: Trade proposal to execute
+            
+        Returns:
+            TradeExecution: Execution details or None if failed
+        """
+        if not self.api_client:
+            self.logger.error("API client not initialized")
+            return None
+        
+        # Generate execution ID
+        execution_id = f"exec_{uuid.uuid4().hex[:8]}_{datetime.utcnow().strftime('%H%M%S')}"
+        
+        try:
+            # Submit order via API client
+            result = await self.api_client.place_order(
+                symbol=proposal.symbol,
+                direction=proposal.direction,
+                size=proposal.size,
+                order_type="MARKET",  # Currently only supporting market orders
+                price=proposal.entry_price,
+                stop_loss=proposal.stop_loss,
+                take_profit=proposal.take_profit
             )
-        else:
-            # This would initialize a real trading gateway connection
-            # self.execution_gateway = RealTradingGateway(...)
-            self.logger.warning(f"Gateway type {gateway_type} not implemented, using simulation")
-            self.execution_gateway = SimulatedTradingGateway(
-                slippage_model=self.slippage_model,
-                fixed_slippage_pips=self.fixed_slippage_pips,
-                proportional_slippage=self.proportional_slippage,
-                logger=self.logger
-            )
-        
-        await self.execution_gateway.connect()
-        self.logger.info(f"Connected to {gateway_type} trading gateway")
-    
-    async def handle_approved_trade(self, proposal):
-        """Process an approved trade proposal"""
-        proposal_id = proposal.get("id")
-        if not proposal_id:
-            return
-        
-        # Store in pending trades
-        self.pending_trades[proposal_id] = proposal
-        
-        # Set expiry time
-        time_limit = proposal.get("time_limit_seconds", 3600)  # Default 1 hour
-        expiry_time = datetime.utcnow() + timedelta(seconds=time_limit)
-        self.pending_trades[proposal_id]["expiry_time"] = expiry_time
-        
-        self.logger.info(f"Received approved trade proposal {proposal_id} for {proposal.get('symbol')}")
-        
-        # Attempt immediate execution
-        await self.execute_trade(proposal_id)
-    
-    async def execute_trade(self, proposal_id):
-        """Execute a trade based on a proposal"""
-        proposal = self.pending_trades.get(proposal_id)
-        if not proposal:
-            self.logger.warning(f"Trade proposal {proposal_id} not found")
-            return
-        
-        symbol = proposal.get("symbol")
-        direction = proposal.get("direction")
-        size = proposal.get("size")
-        entry_price = proposal.get("entry_price")  # None for market order
-        
-        # Request execution from gateway
-        execution_result = await self.execution_gateway.execute_trade(
-            symbol=symbol,
-            direction=direction,
-            size=size,
-            order_type="MARKET" if entry_price is None else "LIMIT",
-            limit_price=entry_price
-        )
-        
-        if execution_result.get("success"):
+            
+            if not result.get("success", False):
+                self.logger.error(f"Order execution failed: {result.get('error', 'Unknown error')}")
+                return None
+            
+            # Get executed price and order ID
+            executed_price = result.get("executed_price", proposal.entry_price)
+            order_id = result.get("order_id", execution_id)
+            
+            # Calculate slippage
+            entry_price = proposal.entry_price or executed_price
+            slippage = abs(executed_price - entry_price) if proposal.entry_price else 0
+            
             # Create execution record
-            execution_id = str(uuid.uuid4())
             execution = TradeExecution(
-                proposal_id=proposal_id,
                 execution_id=execution_id,
-                symbol=symbol,
-                direction=Direction[direction] if isinstance(direction, str) else direction,
-                executed_size=execution_result.get("executed_size"),
-                executed_price=execution_result.get("executed_price"),
-                execution_time=datetime.utcnow(),
-                status=TradeStatus.EXECUTED,
-                metadata={
-                    "strategy_name": proposal.get("strategy_name"),
-                    "stop_loss": proposal.get("stop_loss"),
-                    "take_profit": proposal.get("take_profit")
+                proposal_id=proposal.id,
+                order_id=order_id,
+                symbol=proposal.symbol,
+                direction=proposal.direction,
+                requested_size=proposal.size,
+                executed_size=result.get("executed_size", proposal.size),
+                requested_price=proposal.entry_price,
+                executed_price=executed_price,
+                stop_loss=proposal.stop_loss,
+                take_profit=proposal.take_profit,
+                execution_time=datetime.utcnow().isoformat(),
+                slippage=slippage,
+                status=TradeStatus.OPEN,
+                gateway_type=self.gateway_type
+            )
+            
+            # Store in open trades
+            self.open_trades[execution_id] = {
+                "execution": execution.__dict__,
+                "proposal": proposal.__dict__,
+                "order_id": order_id,
+                "entry_time": datetime.utcnow(),
+                "last_check_time": datetime.utcnow(),
+                "current_price": executed_price,
+                "unrealized_pnl": 0.0
+            }
+            
+            self.logger.info(f"Trade executed: {proposal.symbol} {proposal.direction} at {executed_price}")
+            return execution
+        
+        except Exception as e:
+            self.logger.error(f"Error executing trade: {e}")
+            return None
+    
+    async def monitor_open_trades(self):
+        """Monitor open trades for stop loss, take profit, or manual closing"""
+        if not self.open_trades:
+            return
+        
+        # Check each open trade
+        for trade_id in list(self.open_trades.keys()):
+            trade = self.open_trades[trade_id]
+            
+            try:
+                # Get current price from API client
+                symbol = trade["execution"]["symbol"]
+                current_price = await self.api_client.get_current_price(symbol)
+                
+                if current_price is None:
+                    continue
+                
+                # Update trade with current price
+                trade["current_price"] = current_price
+                trade["last_check_time"] = datetime.utcnow()
+                
+                # Calculate unrealized P&L
+                direction = trade["execution"]["direction"]
+                entry_price = trade["execution"]["executed_price"]
+                size = trade["execution"]["executed_size"]
+                
+                pip_value = 0.0001 if not symbol.endswith("JPY") else 0.01
+                price_diff = current_price - entry_price
+                
+                if direction == Direction.SHORT:
+                    price_diff = -price_diff
+                
+                # Simple P&L calculation (in account currency)
+                unrealized_pnl = price_diff * size / pip_value
+                trade["unrealized_pnl"] = unrealized_pnl
+                
+                # Check stop loss and take profit
+                stop_loss = trade["execution"].get("stop_loss")
+                take_profit = trade["execution"].get("take_profit")
+                
+                # Check if stop loss hit
+                if stop_loss is not None:
+                    if (direction == Direction.LONG and current_price <= stop_loss) or \
+                       (direction == Direction.SHORT and current_price >= stop_loss):
+                        # Close trade at stop loss
+                        await self.close_trade(trade_id, "Stop loss hit")
+                        continue
+                
+                # Check if take profit hit
+                if take_profit is not None:
+                    if (direction == Direction.LONG and current_price >= take_profit) or \
+                       (direction == Direction.SHORT and current_price <= take_profit):
+                        # Close trade at take profit
+                        await self.close_trade(trade_id, "Take profit hit")
+                        continue
+                
+                # Check if trade has been open too long
+                max_hold_time = trade.get("max_hold_minutes", 1440)  # Default to 24 hours
+                if (datetime.utcnow() - trade["entry_time"]).total_seconds() / 60 > max_hold_time:
+                    # Close trade due to max hold time
+                    await self.close_trade(trade_id, "Maximum hold time reached")
+                    continue
+            
+            except Exception as e:
+                self.logger.error(f"Error monitoring trade {trade_id}: {e}")
+    
+    async def close_trade(self, trade_id: str, reason: str):
+        """
+        Close an open trade
+        
+        Args:
+            trade_id: ID of trade to close
+            reason: Reason for closing
+        """
+        if trade_id not in self.open_trades:
+            self.logger.warning(f"Attempted to close non-existent trade {trade_id}")
+            return
+        
+        trade = self.open_trades[trade_id]
+        
+        try:
+            # Close position via API client
+            result = await self.api_client.close_order(
+                symbol=trade["execution"]["symbol"],
+                order_id=trade["order_id"],
+                size=trade["execution"]["executed_size"]
+            )
+            
+            if not result.get("success", False):
+                self.logger.error(f"Failed to close trade {trade_id}: {result.get('error', 'Unknown error')}")
+                return
+            
+            # Get closing price
+            closing_price = result.get("executed_price", trade["current_price"])
+            
+            # Calculate profit/loss
+            entry_price = trade["execution"]["executed_price"]
+            size = trade["execution"]["executed_size"]
+            direction = trade["execution"]["direction"]
+            
+            price_diff = closing_price - entry_price
+            if direction == Direction.SHORT:
+                price_diff = -price_diff
+            
+            pip_value = 0.0001 if not trade["execution"]["symbol"].endswith("JPY") else 0.01
+            profit_loss = price_diff * size / pip_value
+            
+            # Create trade result
+            trade_result = TradeResult(
+                trade_id=trade_id,
+                proposal_id=trade["execution"]["proposal_id"],
+                symbol=trade["execution"]["symbol"],
+                direction=trade["execution"]["direction"],
+                entry_price=entry_price,
+                exit_price=closing_price,
+                size=size,
+                entry_time=trade["entry_time"].isoformat(),
+                exit_time=datetime.utcnow().isoformat(),
+                profit_loss=profit_loss,
+                reason=reason,
+                holding_time_minutes=round((datetime.utcnow() - trade["entry_time"]).total_seconds() / 60),
+                strategy=trade["proposal"].get("strategy", "unknown")
+            )
+            
+            # Move from open trades to history
+            self.trade_history[trade_id] = {
+                **trade,
+                "result": trade_result.__dict__,
+                "close_time": datetime.utcnow()
+            }
+            
+            # Remove from open trades
+            del self.open_trades[trade_id]
+            
+            # Send trade result message
+            await self.send_message(
+                MessageType.TRADE_RESULT,
+                {
+                    "result": trade_result.__dict__,
+                    "timestamp": datetime.utcnow().isoformat()
                 }
             )
             
-            # Record the active trade
-            self.active_trades[execution_id] = {
-                "execution": execution.__dict__,
-                "stop_loss_price": self.calculate_stop_price(execution, proposal),
-                "take_profit_price": self.calculate_take_profit_price(execution, proposal)
-            }
-            
-            # Remove from pending trades
-            del self.pending_trades[proposal_id]
-            
-            # Broadcast execution
-            await self.send_message(
-                MessageType.TRADE_EXECUTION,
-                {"execution": execution.__dict__}
-            )
-            
-            self.logger.info(f"Executed trade for {symbol}: {direction} {execution.executed_size} @ {execution.executed_price}")
-        else:
-            # Handle execution failure
-            error = execution_result.get("error", "Unknown error")
-            self.logger.error(f"Trade execution failed: {error}")
-            
-            # Retry later if it's a temporary error
-            if "temporary" in error.lower():
-                self.logger.info(f"Will retry execution for {proposal_id} later")
-            else:
-                # Cancel the trade for permanent errors
-                await self.cancel_trade(proposal_id, f"Execution failed: {error}")
-    
-    async def cancel_trade(self, proposal_id, reason):
-        """Cancel a pending trade"""
-        if proposal_id in self.pending_trades:
-            proposal = self.pending_trades[proposal_id]
-            symbol = proposal.get("symbol")
-            
-            # Create execution with canceled status
-            execution = TradeExecution(
-                proposal_id=proposal_id,
-                execution_id=str(uuid.uuid4()),
-                symbol=symbol,
-                direction=Direction[proposal.get("direction")] if isinstance(proposal.get("direction"), str) else proposal.get("direction"),
-                executed_size=0,
-                executed_price=0,
-                execution_time=datetime.utcnow(),
-                status=TradeStatus.CANCELED,
-                metadata={"reason": reason}
-            )
-            
-            # Remove from pending
-            del self.pending_trades[proposal_id]
-            
-            # Broadcast cancellation
-            await self.send_message(
-                MessageType.TRADE_EXECUTION,
-                {"execution": execution.__dict__}
-            )
-            
-            self.logger.info(f"Canceled trade {proposal_id} for {symbol}: {reason}")
-    
-    async def cancel_all_pending_trades(self, reason):
-        """Cancel all pending trades"""
-        proposal_ids = list(self.pending_trades.keys())
-        for proposal_id in proposal_ids:
-            await self.cancel_trade(proposal_id, reason)
+            self.logger.info(f"Closed trade {trade_id}: {reason}, P&L: {profit_loss:.2f}")
         
-        self.logger.warning(f"Canceled all pending trades: {reason}")
-    
-    async def process_pending_trades(self):
-        """Process pending trades for execution or expiry"""
-        now = datetime.utcnow()
-        
-        for proposal_id, proposal in list(self.pending_trades.items()):
-            # Check for expiry
-            expiry_time = proposal.get("expiry_time")
-            if expiry_time and now > expiry_time:
-                await self.cancel_trade(proposal_id, "Trade proposal expired")
-                continue
-            
-            # Attempt execution for market orders or limit orders if the price is right
-            entry_price = proposal.get("entry_price")
-            if entry_price is None:  # Market order
-                await self.execute_trade(proposal_id)
-            else:
-                # For limit orders, check if the market price has reached the limit price
-                symbol = proposal.get("symbol")
-                direction = proposal.get("direction")
-                
-                if symbol in self.market_data:
-                    current_bid = self.market_data[symbol].get("bid", 0)
-                    current_ask = self.market_data[symbol].get("ask", 0)
-                    
-                    # Check if limit price is reached
-                    if (direction == Direction.LONG and current_ask <= entry_price) or \
-                       (direction == Direction.SHORT and current_bid >= entry_price):
-                        await self.execute_trade(proposal_id)
-    
-    async def monitor_active_trades(self):
-        """Monitor active trades for stop loss, take profit, or trailing stop adjustment"""
-        # Update market data first
-        await self.update_market_data()
-        
-        # Check each active trade
-        for execution_id, trade in list(self.active_trades.items()):
-            execution = trade.get("execution", {})
-            symbol = execution.get("symbol")
-            
-            if symbol not in self.market_data:
-                continue
-            
-            current_bid = self.market_data[symbol].get("bid", 0)
-            current_ask = self.market_data[symbol].get("ask", 0)
-            direction = execution.get("direction")
-            
-            # Determine current price based on direction (for calculating P/L)
-            current_price = current_bid if direction == Direction.LONG.value else current_ask
-            entry_price = execution.get("executed_price", 0)
-            
-            # Calculate unrealized P/L
-            direction_mult = 1 if direction == Direction.LONG.value else -1
-            pips_factor = 10000  # Assuming 4 decimal places for forex
-            unrealized_pips = (current_price - entry_price) * direction_mult * pips_factor
-            
-            # Check stop loss
-            stop_loss_price = trade.get("stop_loss_price")
-            if stop_loss_price and ((direction == Direction.LONG.value and current_bid <= stop_loss_price) or 
-                                   (direction == Direction.SHORT.value and current_ask >= stop_loss_price)):
-                await self.close_trade(execution_id, "Stop loss triggered", current_price, unrealized_pips)
-                continue
-            
-            # Check take profit
-            take_profit_price = trade.get("take_profit_price")
-            if take_profit_price and ((direction == Direction.LONG.value and current_bid >= take_profit_price) or 
-                                     (direction == Direction.SHORT.value and current_ask <= take_profit_price)):
-                await self.close_trade(execution_id, "Take profit reached", current_price, unrealized_pips)
-                continue
-            
-            # Update trailing stop if applicable
-            if "trailing_stop" in trade and trade["trailing_stop"]["enabled"]:
-                await self.update_trailing_stop(execution_id, trade, current_price, unrealized_pips)
-    
-    async def close_trade(self, execution_id, reason, close_price, profit_pips):
-        """Close an active trade"""
-        if execution_id not in self.active_trades:
-            return
-        
-        trade = self.active_trades[execution_id]
-        execution = trade.get("execution", {})
-        symbol = execution.get("symbol")
-        direction = execution.get("direction")
-        size = execution.get("executed_size")
-        
-        # Calculate actual profit
-        position_size_usd = size / 10000  # Convert from standard lots to USD value
-        pip_value = position_size_usd * 10  # Assuming $10 per pip for each $100,000
-        profit_amount = profit_pips * pip_value / 10000  # Convert to dollar amount
-        
-        # Request trade closure from gateway
-        close_result = await self.execution_gateway.close_trade(
-            trade_id=execution_id,
-            symbol=symbol,
-            direction=Direction.SHORT.value if direction == Direction.LONG.value else Direction.LONG.value,
-            size=size
-        )
-        
-        if close_result.get("success"):
-            # Create trade result
-            trade_result = {
-                "execution_id": execution_id,
-                "proposal_id": execution.get("proposal_id"),
-                "symbol": symbol,
-                "direction": direction,
-                "open_price": execution.get("executed_price"),
-                "close_price": close_price,
-                "size": size,
-                "profit_pips": profit_pips,
-                "profit": profit_amount,
-                "open_time": execution.get("execution_time"),
-                "close_time": datetime.utcnow().isoformat(),
-                "reason": reason,
-                "strategy_name": execution.get("metadata", {}).get("strategy_name"),
-                "successful": profit_pips > 0,
-                "position_closed": True
-            }
-            
-            # Remove from active trades
-            del self.active_trades[execution_id]
-            
-            # Broadcast trade result
-            await self.send_message(
-                MessageType.TRADE_RESULT,
-                trade_result
-            )
-            
-            self.logger.info(f"Closed trade {execution_id} for {symbol}: {reason}, profit: {profit_pips:.1f} pips (${profit_amount:.2f})")
-        else:
-            # Handle closure failure
-            error = close_result.get("error", "Unknown error")
-            self.logger.error(f"Trade closure failed: {error}")
-    
-    async def update_trailing_stop(self, execution_id, trade, current_price, unrealized_pips):
-        """Update trailing stop loss if market has moved in favorable direction"""
-        execution = trade.get("execution", {})
-        direction = execution.get("direction")
-        trailing_stop = trade["trailing_stop"]
-        
-        # Calculate the new stop loss level based on current price and trailing distance
-        trailing_distance = trailing_stop.get("distance_pips", 50) / 10000
-        
-        if direction == Direction.LONG.value and current_price - trailing_distance > trade["stop_loss_price"]:
-            # Update stop loss to trail price (preserving the distance)
-            new_stop = current_price - trailing_distance
-            trade["stop_loss_price"] = new_stop
-            self.logger.info(f"Updated trailing stop for {execution_id} to {new_stop}")
-        
-        elif direction == Direction.SHORT.value and current_price + trailing_distance < trade["stop_loss_price"]:
-            # Update stop loss to trail price (preserving the distance)
-            new_stop = current_price + trailing_distance
-            trade["stop_loss_price"] = new_stop
-            self.logger.info(f"Updated trailing stop for {execution_id} to {new_stop}")
-    
-    async def update_market_data(self):
-        """Update market data for all actively traded symbols"""
-        # Collect symbols from pending and active trades
-        symbols = set()
-        
-        for proposal in self.pending_trades.values():
-            symbols.add(proposal.get("symbol"))
-        
-        for trade in self.active_trades.values():
-            execution = trade.get("execution", {})
-            symbols.add(execution.get("symbol"))
-        
-        # Fetch market data for each symbol
-        for symbol in symbols:
-            market_data = await self.execution_gateway.get_market_data(symbol)
-            if market_data:
-                self.market_data[symbol] = market_data
-    
-    def calculate_stop_price(self, execution, proposal):
-        """Calculate the actual stop loss price"""
-        direction = execution.executed_direction
-        executed_price = execution.executed_price
-        stop_loss_pips = proposal.get("stop_loss", 50)
-        
-        # Convert pips to price distance
-        stop_distance = stop_loss_pips / 10000
-        
-        if direction == Direction.LONG:
-            return executed_price - stop_distance
-        else:  # SHORT
-            return executed_price + stop_distance
-    
-    def calculate_take_profit_price(self, execution, proposal):
-        """Calculate the actual take profit price"""
-        direction = execution.executed_direction
-        executed_price = execution.executed_price
-        take_profit_pips = proposal.get("take_profit", 100)
-        
-        # Convert pips to price distance
-        tp_distance = take_profit_pips / 10000
-        
-        if direction == Direction.LONG:
-            return executed_price + tp_distance
-        else:  # SHORT
-            return executed_price - tp_distance
+        except Exception as e:
+            self.logger.error(f"Error closing trade {trade_id}: {e}")
 
 
-class SimulatedTradingGateway:
-    """A simulated trading gateway for backtesting and development"""
+class SimulationGateway:
+    """Simple simulation gateway for testing"""
     
-    def __init__(self, slippage_model="fixed", fixed_slippage_pips=1.0, proportional_slippage=0.0001, logger=None):
-        self.slippage_model = slippage_model
-        self.fixed_slippage_pips = fixed_slippage_pips
-        self.proportional_slippage = proportional_slippage
-        self.logger = logger
+    def __init__(self, symbols: List[str], config: Dict = None):
+        """Initialize simulation gateway"""
+        self.symbols = symbols
+        self.config = config or {}
+        self.logger = logging.getLogger("simulation_gateway")
         self.connected = False
-        self.market_data = {}
-        self.executed_trades = {}
-        self.next_trade_id = 1
+        self.market_prices = {}  # symbol -> price
+        self.open_orders = {}  # order_id -> order details
+        
+        # Initialize with default prices
+        for symbol in symbols:
+            self.market_prices[symbol] = 1.0
     
     async def connect(self):
-        """Connect to the simulated trading environment"""
+        """Connect to simulated gateway"""
         self.connected = True
-        
-        # Initialize simulated market data for common forex pairs
-        pairs = ["EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD", "NZD/USD", "USD/CAD", "EUR/GBP"]
-        
-        for pair in pairs:
-            self.market_data[pair] = {
-                # Typical spreads for major pairs
-                "bid": self._get_initial_price(pair),
-                "ask": self._get_initial_price(pair) + self._get_spread(pair),
-                "time": datetime.utcnow().isoformat(),
-                "volume": 0
-            }
-        
-        if self.logger:
-            self.logger.info("Connected to simulated trading environment")
+        return True
     
     async def disconnect(self):
-        """Disconnect from the simulated trading environment"""
+        """Disconnect from simulated gateway"""
         self.connected = False
-        if self.logger:
-            self.logger.info("Disconnected from simulated trading environment")
+        return True
     
-    async def execute_trade(self, symbol, direction, size, order_type="MARKET", limit_price=None):
-        """Execute a simulated trade"""
-        if not self.connected:
-            return {"success": False, "error": "Not connected"}
+    async def update_market_data(self, data: Dict):
+        """Update market data"""
+        symbol = data.get("symbol")
+        if not symbol or symbol not in self.symbols:
+            return
         
-        if symbol not in self.market_data:
+        # Update price if OHLC data is available
+        ohlc = data.get("ohlc")
+        if ohlc and "close" in ohlc:
+            self.market_prices[symbol] = ohlc["close"]
+    
+    async def get_current_price(self, symbol: str) -> Optional[float]:
+        """Get current price for a symbol"""
+        if not self.connected:
+            return None
+        
+        return self.market_prices.get(symbol)
+    
+    async def place_order(self, symbol: str, direction: str, size: float, 
+                        order_type: str, price: Optional[float] = None,
+                        stop_loss: Optional[float] = None, 
+                        take_profit: Optional[float] = None) -> Dict:
+        """
+        Place a simulated order
+        
+        Args:
+            symbol: Trading symbol
+            direction: Trade direction
+            size: Trade size
+            order_type: Order type (MARKET, LIMIT)
+            price: Limit price (for LIMIT orders)
+            stop_loss: Stop loss price
+            take_profit: Take profit price
+            
+        Returns:
+            Dict: Order execution result
+        """
+        if not self.connected:
+            return {"success": False, "error": "Gateway not connected"}
+        
+        if symbol not in self.market_prices:
             return {"success": False, "error": f"Symbol {symbol} not found"}
         
-        # Get current market data
-        market = self.market_data[symbol]
+        # Get current price
+        current_price = self.market_prices[symbol]
         
-        # Apply slippage to determine execution price
-        if direction == Direction.LONG or direction == Direction.LONG.value:
-            base_price = market["ask"]
-            slippage = self._calculate_slippage(base_price, True)
-            executed_price = base_price + slippage
-        else:  # SHORT
-            base_price = market["bid"]
-            slippage = self._calculate_slippage(base_price, False)
-            executed_price = base_price - slippage
+        # Add small random slippage
+        import random
+        slippage_pips = random.uniform(-2, 2)
+        pip_value = 0.0001 if not symbol.endswith("JPY") else 0.01
+        executed_price = current_price + (slippage_pips * pip_value)
         
-        # For limit orders, check if the price is acceptable
-        if order_type == "LIMIT" and limit_price is not None:
-            if
+        # Generate order ID
+        order_id = f"sim_{uuid.uuid4().hex[:8]}"
+        
+        # Store order
+        self.open_orders[order_id] = {
+            "symbol": symbol,
+            "direction": direction,
+            "size": size,
+            "executed_price": executed_price,
+            "stop_loss": stop_loss,
+            "take_profit": take_profit,
+            "order_time": datetime.utcnow()
+        }
+        
+        return {
+            "success": True,
+            "order_id": order_id,
+            "executed_price": executed_price,
+            "executed_size": size
+        }
+    
+    async def close_order(self, symbol: str, order_id: str, size: float) -> Dict:
+        """
+        Close a simulated order
+        
+        Args:
+            symbol: Trading symbol
+            order_id: Order ID to close
+            size: Size to close
+            
+        Returns:
+            Dict: Order closure result
+        """
+        if not self.connected:
+            return {"success": False, "error": "Gateway not connected"}
+        
+        if order_id not in self.open_orders:
+            return {"success": False, "error": f"Order {order_id} not found"}
+        
+        # Get current price
+        current_price = self.market_prices.get(symbol)
+        
+        # Add small random slippage
+        import random
+        slippage_pips = random.uniform(-2, 2)
+        pip_value = 0.0001 if not symbol.endswith("JPY") else 0.01
+        executed_price = current_price + (slippage_pips * pip_value)
+        
+        # Remove order
+        self.open_orders.pop(order_id)
+        
+        return {
+            "success": True,
+            "order_id": order_id,
+            "executed_price": executed_price,
+            "executed_size": size
+        }
