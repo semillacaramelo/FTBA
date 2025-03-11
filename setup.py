@@ -31,6 +31,6 @@ setup(
         "simplejson>=3.17.6",
     ],
     dependency_links=[
-        "git+https://github.com/deriv-com/python-deriv-api.git#egg=deriv-api"
+        "git+https://github.com/deriv-com/python-deriv-api.git#egg=python-deriv-api"
     ],
 )

@@ -103,3 +103,6 @@ websockets
 websockets
 websockets
 websockets
+nest-asyncio
+simplejson
+websocket-client

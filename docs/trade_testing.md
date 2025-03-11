@@ -1,32 +1,58 @@
 # Trade Testing Guide
 
-This document explains how to use the trade testing functionality in the FTBA system to verify that the Deriv API integration is working correctly.
-
 ## Overview
 
-The trade testing feature (`--tradetest` option) executes one CALL (buy) and one PUT (sell) contract on EUR/USD using the Deriv demo account. This allows you to verify that:
-
-1. The connection to the Deriv API is working
-2. Your API tokens are valid
-3. Trades can be executed successfully
-4. The response handling is functioning properly
+The FTBA (Forex Trading Bot Automation) system includes a trade testing feature that allows you to validate the system's ability to execute real trades on a Deriv DEMO account. This document explains how to set up and use this feature.
 
 ## Prerequisites
 
-Before using the trade testing functionality, ensure you have:
+Before using the trade testing feature, make sure you have:
 
-1. A Deriv demo account
-2. A Deriv API token with trading permissions for the demo account
-3. The Deriv API App ID
-4. Both values set as environment variables:
-   ```
-   DERIV_APP_ID=your_app_id
-   DERIV_DEMO_API_TOKEN=your_demo_token
-   ```
+1. A Deriv account (register at [Deriv.com](https://deriv.com) if you don't have one)
+2. A Deriv App ID (create one at [Deriv Developers](https://developers.deriv.com/))
+3. A Demo API token (create one at [Deriv API Token Page](https://app.deriv.com/account/api-token))
+4. Configured these credentials in your environment (see [Dependency Management](dependency_management.md))
 
-## Running a Trade Test
+## Setting Up Credentials
 
-To execute the test trades, run:
+You have two options for setting up your Deriv API credentials:
+
+### Option 1: Using the Setup Wizard
+
+Run the setup wizard script:
+
+```bash
+python scripts/setup_deriv.py
+```
+
+This interactive script will guide you through the process of configuring your credentials.
+
+### Option 2: Manual Configuration
+
+Set the environment variables directly:
+
+```bash
+# Linux/macOS
+export DERIV_APP_ID=your_app_id
+export DERIV_DEMO_API_TOKEN=your_demo_token
+
+# Windows
+set DERIV_APP_ID=your_app_id
+set DERIV_DEMO_API_TOKEN=your_demo_token
+```
+
+Alternatively, create a `config/deriv.ini` file:
+
+```ini
+[deriv]
+app_id = your_app_id
+demo_api_token = your_demo_token
+use_demo = true
+```
+
+## Running the Trade Test
+
+To execute a test trade, run:
 
 ```bash
 python main.py --tradetest
@@ -34,151 +60,56 @@ python main.py --tradetest
 
 This will:
 
-1. Initialize the system with minimal components
-2. Connect to the Deriv API using your credentials
-3. Execute a CALL trade on EUR/USD
-4. Execute a PUT trade on EUR/USD
-5. Display detailed status updates in the console
-6. Write the trade results to `tradetest_output.log`
+1. Initialize the full multi-agent system
+2. Connect to your Deriv DEMO account
+3. Execute a test PUT (buy) and CALL (sell) trade
+4. Log the results to `tradetest_output.log`
 
-## Expected Output
+## Test Trade Parameters
 
-A successful test will produce console output similar to:
+The test trades use the following default parameters:
 
-```
-ℹ️ [INFO] Starting trade test mode
-⚙️ [SYSTEM] Initializing Deriv API client
-✅ [SUCCESS] Connected to Deriv API
-📊 [DATA] Current EUR/USD price: 1.0865/1.0867
-⏳ [TRADE PENDING] Executing CALL trade for EUR/USD
-📈 [TRADE SUCCESS] CALL contract executed
-   Contract ID: 275102430888
-   Buy price: 10.00 USD
-   Symbol: frxEURUSD
-   Duration: 1 day
-⏳ [TRADE PENDING] Executing PUT trade for EUR/USD
-📈 [TRADE SUCCESS] PUT contract executed
-   Contract ID: 275102432788
-   Buy price: 10.00 USD
-   Symbol: frxEURUSD
-   Duration: 1 day
-✅ [SUCCESS] Trade test completed successfully
-ℹ️ [INFO] Trade details saved to tradetest_output.log
-```
+- Symbol: EUR/USD (can be configured in config/testing.yml)
+- Contract Type: CALL/PUT (Rise/Fall)
+- Duration: 5 minutes
+- Stake Amount: 10 USD (minimum allowed by Deriv)
 
-## Trade Parameters
+## Interpreting Results
 
-The test trades use the following parameters:
+After running the test, check the output log file (`tradetest_output.log`) for detailed information about the trades. Successful test trades will show:
 
-- **Symbol**: EUR/USD (frxEURUSD in Deriv format)
-- **Trade size**: 10.00 USD
-- **Duration**: 1 day
-- **Contract types**: CALL and PUT (binary options)
-
-These parameters are hardcoded for the test and don't reflect the actual trading parameters that would be used in production.
-
-## Verifying Results
-
-After running a trade test, you can:
-
-1. Check the console output for success messages
-2. Review the `tradetest_output.log` file for detailed trade information
-3. Log in to your Deriv demo account to view the executed trades
+- Contract IDs
+- Entry prices
+- Transaction timestamps
+- Contract status updates
 
 ## Troubleshooting
 
-### Connection Issues
+If you encounter issues with trade testing:
 
-If you see an error like:
+1. **Connection Issues**: Verify your internet connection and firewall settings.
+2. **Authentication Errors**: Confirm your API token is valid and has appropriate permissions.
+3. **Invalid App ID**: Verify your App ID is correct and registered with Deriv.
+4. **Market Closed**: Some symbols are only available during market hours. Try EUR/USD which has longer trading hours.
+5. **Insufficient Funds**: Ensure your demo account has sufficient balance.
 
-```
-❌ [ERROR] Failed to connect to Deriv API: Connection timed out
-```
+Run the check dependencies script to verify all required components are installed:
 
-Check:
-- Your internet connection
-- Firewall settings that might block WebSocket connections
-- The Deriv API endpoint status (see https://api.deriv.com/status)
-
-### Authentication Errors
-
-If you see an error like:
-
-```
-❌ [ERROR] Authorization failed: Invalid token
+```bash
+python scripts/check_dependencies.py
 ```
 
-Check:
-- Your `DERIV_DEMO_API_TOKEN` environment variable is set correctly
-- The token has permissions for the demo account
-- The token hasn't expired (regenerate a new one if needed)
+## Important Notes
 
-### App ID Errors
+- **Always use a DEMO account** for testing. Never use a real money account for automated testing.
+- The default trade size is minimal (10 USD) to avoid significant virtual balance reduction.
+- Test trades are executed immediately regardless of agent recommendations.
+- Test trades are executed with a 5-minute duration by default.
 
-If you see an error like:
+## Next Steps
 
-```
-❌ [ERROR] Invalid App ID
-```
+After successful trade testing, you can:
 
-Check:
-- Your `DERIV_APP_ID` environment variable is set correctly
-- Your App ID is registered and active on Deriv
-
-## Example Log File
-
-The `tradetest_output.log` file contains detailed information about the executed trades:
-
-```
-[2025-03-11 12:34:56] Trade Test Started
-[2025-03-11 12:34:57] Connected to Deriv API with App ID: 1234
-[2025-03-11 12:34:58] Current market price for EUR/USD: 1.0865/1.0867
-[2025-03-11 12:34:59] Executing CALL contract on frxEURUSD:
-  - Amount: 10.00 USD
-  - Duration: 1 day
-  - Direction: CALL
-[2025-03-11 12:35:00] CALL contract executed successfully:
-  - Contract ID: 275102430888
-  - Buy price: 10.00 USD
-  - Payout: 18.20 USD
-  - Start: 2025-03-11 12:35:00
-  - End: 2025-03-12 12:35:00
-[2025-03-11 12:35:01] Executing PUT contract on frxEURUSD:
-  - Amount: 10.00 USD
-  - Duration: 1 day
-  - Direction: PUT
-[2025-03-11 12:35:02] PUT contract executed successfully:
-  - Contract ID: 275102432788
-  - Buy price: 10.00 USD
-  - Payout: 18.20 USD
-  - Start: 2025-03-11 12:35:02
-  - End: 2025-03-12 12:35:02
-[2025-03-11 12:35:03] Trade Test Completed
-```
-
-## Using Trade Tests in Development
-
-The trade test functionality is useful during development for:
-
-1. **Initial Setup Verification**: Confirm that your development environment can connect to the Deriv API
-2. **CI/CD Pipeline Testing**: Verify API integration in automated builds (using secure environment variables)
-3. **API Changes Monitoring**: Detect changes in the Deriv API that might affect your implementation
-4. **Demo Account Verification**: Ensure your demo account is active and configured correctly
-
-## Security Considerations
-
-Remember:
-
-1. **Never commit API tokens to source control**
-2. Use environment variables or secure credential storage
-3. Only use demo accounts for testing
-4. Monitor your demo account for any unexpected activity
-
-## Next Steps After Testing
-
-After successfully running trade tests:
-
-1. Review the code in `main.py` and `system/deriv_api_client.py` to understand the implementation
-2. Check how trades are executed in `--tradetest` mode
-3. Compare with the full system's trade execution flow in production mode
-4. Consider adding more comprehensive tests for different market conditions and contract types
+1. Adjust trading parameters in the configuration files
+2. Implement your own custom strategies
+3. Modify agent behaviors based on your trading preferences
