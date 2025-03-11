@@ -7,14 +7,15 @@ import os
 import signal
 import sys
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict, List, Any
 
-from system.agent import MessageBroker
+from system.agent import MessageBroker, Agent
 from agents.technical_analysis_agent import TechnicalAnalysisAgent
 from agents.fundamental_analysis_agent import FundamentalAnalysisAgent
 from agents.risk_management_agent import RiskManagementAgent
 from agents.strategy_optimization_agent import StrategyOptimizationAgent
 from agents.trade_execution_agent import TradeExecutionAgent
+from system.error_handling import setup_error_handling
 
 def setup_logging(config: Dict) -> logging.Logger:
     """Set up logging based on configuration"""
@@ -142,8 +143,6 @@ async def run_system(config):
     try:
         # Wait for shutdown signal
         await stop_event.wait()
-    except Exception as e:
-        logger.error(f"Error during system operation: {e}")
     finally:
         # Stop all agents gracefully
         for name, agent in agents.items():
@@ -202,15 +201,19 @@ def main():
     logger = setup_logging(config)
     logger.info("Multi-Agent Forex Trading System starting up")
     
+    # Setup error handling
+    setup_error_handling()
+    
     # Run the async event loop
     try:
         if sys.platform == 'win32':
             asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
         asyncio.run(run_system(config))
+    except KeyboardInterrupt:
+        logger.info("System shutdown requested by user")
     except Exception as e:
-        if not isinstance(e, KeyboardInterrupt):
-            logger.error(f"Critical error: {e}")
-            sys.exit(1)
+        logger.error(f"Critical error: {e}", exc_info=True)
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
