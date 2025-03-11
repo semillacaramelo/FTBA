@@ -54,6 +54,16 @@ class Timeframe(Enum):
     W1 = "1w"     # 1 week
 
 
+class Indicator(Enum):
+    """Technical indicator enumeration"""
+    MOVING_AVERAGE_CROSSOVER = "MOVING_AVERAGE_CROSSOVER"
+    RSI = "RSI"
+    MACD = "MACD"
+    BOLLINGER_BANDS = "BOLLINGER_BANDS"
+    ATR = "ATR"
+    STOCHASTIC = "STOCHASTIC"
+
+
 @dataclass
 class TechnicalSignal:
     """Technical analysis signal data structure"""
