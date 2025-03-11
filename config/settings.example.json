@@ -1,4 +1,3 @@
-
 {
   "system": {
     "log_level": "INFO",
@@ -7,48 +6,49 @@
   },
   "market_data": {
     "provider": "simulation",
-    "symbols": ["EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD"],
-    "timeframes": ["1m", "5m", "15m", "1h", "4h", "1d"]
+    "symbols": ["EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD"]
+  },
+  "deriv_api": {
+    "app_id": "YOUR_APP_ID",
+    "endpoint": "wss://ws.binaryws.com/websockets/v3",
+    "account_type": "demo",
+    "symbols_mapping": {
+      "EUR/USD": "frxEURUSD",
+      "GBP/USD": "frxGBPUSD",
+      "USD/JPY": "frxUSDJPY",
+      "USD/CHF": "frxUSDCHF",
+      "AUD/USD": "frxAUDUSD"
+    },
+    "default_contract_type": "CALL/PUT",
+    "default_duration": 5,
+    "default_duration_unit": "m"
   },
   "risk_management": {
     "max_account_risk_percent": 2.0,
     "max_position_size_percent": 5.0,
-    "max_daily_loss_percent": 5.0,
-    "max_correlation_exposure": 15.0,
-    "update_interval_seconds": 60
+    "max_daily_loss_percent": 5.0
   },
   "agents": {
     "technical_analysis": {
       "analysis_interval_seconds": 60,
-      "signal_threshold": 0.7,
-      "indicators": {
-        "moving_averages": true,
-        "rsi": true,
-        "macd": true,
-        "bollinger_bands": true,
-        "support_resistance": true
-      }
+      "signal_threshold": 0.7
     },
     "fundamental_analysis": {
-      "update_interval_seconds": 300,
-      "currencies_to_monitor": ["USD", "EUR", "GBP", "JPY", "AUD", "CHF", "CAD"],
-      "data_sources": ["simulation"],
-      "sentiment_threshold": 0.5
+      "update_interval_seconds": 300
     },
     "risk_management": {
       "update_interval_seconds": 60
     },
     "strategy_optimization": {
       "update_interval_seconds": 300,
-      "learning_rate": 0.1,
-      "optimization_interval_hours": 24,
-      "min_trades_for_optimization": 20
+      "learning_rate": 0.1
     },
     "trade_execution": {
       "check_interval_seconds": 1,
-      "gateway_type": "simulation",
       "slippage_model": "fixed",
-      "fixed_slippage_pips": 1.0
+      "fixed_slippage_pips": 1.0,
+      "gateway_type": "deriv",
+      "use_demo_account": true
     }
   }
 }
