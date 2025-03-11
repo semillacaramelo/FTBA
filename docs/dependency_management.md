@@ -11,14 +11,20 @@ We've now changed to a more maintainable approach:
 2. This eliminates the need to track the library code in our own repository
 3. Updates can be managed by simply updating the dependency specification
 
-### Important Note on Package Name
+### Important Notes on Deriv API Package
 
-The Deriv API package has a naming inconsistency that should be noted:
-- The GitHub repository is named `python-deriv-api`
-- The package is imported in code as `deriv_api`
-- The correct dependency specification uses `#egg=python-deriv-api`
+The Deriv API package has several important considerations:
 
-This inconsistency can lead to installation issues if not addressed properly.
+1. **Naming Inconsistency**:
+   - The GitHub repository is named `python-deriv-api`
+   - The package is imported in code as `deriv_api`
+   - The correct dependency specification uses `#egg=python-deriv-api`
+
+2. **Version Requirements**:
+   - The package requires `websockets==10.3` specifically
+   - Using any other version of `websockets` will cause dependency conflicts
+
+These inconsistencies can lead to installation issues if not addressed properly.
 
 ## Installation
 

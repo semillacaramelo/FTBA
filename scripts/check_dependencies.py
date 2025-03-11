@@ -40,6 +40,7 @@ def check_deriv_api():
         bool: True if dependency is available, False otherwise
     """
     try:
+        # Check for deriv_api module
         spec = importlib.util.find_spec("deriv_api")
         if spec is None:
             print("\nError: deriv_api module not found.")
@@ -48,6 +49,23 @@ def check_deriv_api():
             print("\nAlternatively, run: pip install -e .")
             print("The setup.py file has been updated with the correct dependency.")
             return False
+        
+        # Check for correct websockets version
+        try:
+            import websockets
+            websockets_version = websockets.__version__
+            if websockets_version != "10.3":
+                print(f"\nWarning: Incorrect websockets version detected: {websockets_version}")
+                print("The python-deriv-api package requires websockets==10.3 specifically.")
+                print("To install the correct version:")
+                print("  pip uninstall -y websockets")
+                print("  pip install websockets==10.3")
+                return False
+        except (ImportError, AttributeError):
+            print("\nWarning: Could not verify websockets version")
+            print("Please ensure you have websockets==10.3 installed for compatibility with python-deriv-api")
+            return False
+        
         return True
     except ImportError:
         print("\nError: deriv_api module not found.")
@@ -71,7 +89,7 @@ def main():
         ("sklearn", "scikit-learn>=1.3.0"),
         ("statsmodels", "statsmodels>=0.14.0"),
         ("aiohttp", "aiohttp>=3.8.5"),
-        ("websockets", "websockets>=11.0.3"),
+        ("websockets", "websockets==10.3"),
         ("pymongo", "pymongo>=4.4.1"),
         ("pydantic", "pydantic>=2.1.1"),
     ]
