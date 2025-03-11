@@ -1,6 +1,6 @@
-
 import asyncio
 import pytest
+import pytest_asyncio
 from typing import List
 from system.agent import Agent, MessageBroker, MessageType, Message
 
@@ -25,11 +25,11 @@ class TestAgent(Agent):
     async def handle_message(self, message):
         self.messages_received.append(message)
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def message_broker():
     """Create a message broker for testing"""
     broker = MessageBroker(batch_size=2)
-    yield broker
+    return broker  # Changed from yield to return
 
 @pytest.mark.asyncio
 async def test_message_broker_initialization():
