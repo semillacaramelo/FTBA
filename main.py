@@ -10,12 +10,15 @@ from datetime import datetime
 from typing import Dict, List, Any
 
 from system.agent import MessageBroker, Agent
-from agents.technical_analysis_agent import TechnicalAnalysisAgent
-from agents.fundamental_analysis_agent import FundamentalAnalysisAgent
-from agents.risk_management_agent import RiskManagementAgent
-from agents.strategy_optimization_agent import StrategyOptimizationAgent
-from agents.trade_execution_agent import TradeExecutionAgent
+from agents import (
+    TechnicalAnalysisAgent,
+    FundamentalAnalysisAgent,
+    RiskManagementAgent,
+    StrategyOptimizationAgent,
+    TradeExecutionAgent
+)
 from system.error_handling import setup_error_handling
+from system.config_validator import validate_configuration
 
 def setup_logging(config: Dict) -> logging.Logger:
     """Set up logging based on configuration"""
@@ -181,14 +184,10 @@ def main():
         
         sys.exit(1)
     
-    try:
-        with open(args.config) as f:
-            config = json.load(f)
-    except json.JSONDecodeError as e:
-        print(f"Error parsing configuration file: {e}")
-        sys.exit(1)
-    except Exception as e:
-        print(f"Error loading configuration file: {e}")
+    # Validate configuration
+    valid, config = validate_configuration(args.config)
+    if not valid:
+        print("Configuration validation failed. Please check the logs for details.")
         sys.exit(1)
     
     # Force simulation mode if specified
