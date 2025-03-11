@@ -34,35 +34,35 @@
         "stop_loss_pips": 10,
         "take_profit_pips": 15,
         "market_volatility": 0.001,
-        "updated_at": "2025-03-11T15:18:46.675960"
+        "updated_at": "2025-03-11T15:42:24.345480"
       },
       "GBP/USD": {
         "max_position_size": 500.0,
         "stop_loss_pips": 10,
         "take_profit_pips": 15,
         "market_volatility": 0.001,
-        "updated_at": "2025-03-11T15:18:46.675986"
+        "updated_at": "2025-03-11T15:42:24.345508"
       },
       "USD/JPY": {
         "max_position_size": 500.0,
         "stop_loss_pips": 10,
         "take_profit_pips": 15,
         "market_volatility": 0.001,
-        "updated_at": "2025-03-11T15:18:46.676001"
+        "updated_at": "2025-03-11T15:42:24.345594"
       },
       "USD/CHF": {
         "max_position_size": 500.0,
         "stop_loss_pips": 10,
         "take_profit_pips": 15,
         "market_volatility": 0.001,
-        "updated_at": "2025-03-11T15:18:46.676014"
+        "updated_at": "2025-03-11T15:42:24.345603"
       },
       "AUD/USD": {
         "max_position_size": 500.0,
         "stop_loss_pips": 10,
         "take_profit_pips": 15,
         "market_volatility": 0.001,
-        "updated_at": "2025-03-11T15:18:46.676026"
+        "updated_at": "2025-03-11T15:42:24.345611"
       }
     }
   },
@@ -100,35 +100,35 @@
         "stop_loss_pips": 10,
         "take_profit_pips": 15,
         "market_volatility": 0.001,
-        "updated_at": "2025-03-11T15:18:46.675974"
+        "updated_at": "2025-03-11T15:42:24.345497"
       },
       "GBP/USD": {
         "max_position_size": 500.0,
         "stop_loss_pips": 10,
         "take_profit_pips": 15,
         "market_volatility": 0.001,
-        "updated_at": "2025-03-11T15:18:46.675990"
+        "updated_at": "2025-03-11T15:42:24.345510"
       },
       "USD/JPY": {
         "max_position_size": 500.0,
         "stop_loss_pips": 10,
         "take_profit_pips": 15,
         "market_volatility": 0.001,
-        "updated_at": "2025-03-11T15:18:46.676004"
+        "updated_at": "2025-03-11T15:42:24.345596"
       },
       "USD/CHF": {
         "max_position_size": 500.0,
         "stop_loss_pips": 10,
         "take_profit_pips": 15,
         "market_volatility": 0.001,
-        "updated_at": "2025-03-11T15:18:46.676017"
+        "updated_at": "2025-03-11T15:42:24.345605"
       },
       "AUD/USD": {
         "max_position_size": 500.0,
         "stop_loss_pips": 10,
         "take_profit_pips": 15,
         "market_volatility": 0.001,
-        "updated_at": "2025-03-11T15:18:46.676029"
+        "updated_at": "2025-03-11T15:42:24.345613"
       }
     }
   },
@@ -168,35 +168,35 @@
         "stop_loss_pips": 10,
         "take_profit_pips": 15,
         "market_volatility": 0.001,
-        "updated_at": "2025-03-11T15:18:46.675977"
+        "updated_at": "2025-03-11T15:42:24.345499"
       },
       "GBP/USD": {
         "max_position_size": 500.0,
         "stop_loss_pips": 10,
         "take_profit_pips": 15,
         "market_volatility": 0.001,
-        "updated_at": "2025-03-11T15:18:46.675993"
+        "updated_at": "2025-03-11T15:42:24.345585"
       },
       "USD/JPY": {
         "max_position_size": 500.0,
         "stop_loss_pips": 10,
         "take_profit_pips": 15,
         "market_volatility": 0.001,
-        "updated_at": "2025-03-11T15:18:46.676006"
+        "updated_at": "2025-03-11T15:42:24.345598"
       },
       "USD/CHF": {
         "max_position_size": 500.0,
         "stop_loss_pips": 10,
         "take_profit_pips": 15,
         "market_volatility": 0.001,
-        "updated_at": "2025-03-11T15:18:46.676019"
+        "updated_at": "2025-03-11T15:42:24.345606"
       },
       "AUD/USD": {
         "max_position_size": 500.0,
         "stop_loss_pips": 10,
         "take_profit_pips": 15,
         "market_volatility": 0.001,
-        "updated_at": "2025-03-11T15:18:46.676032"
+        "updated_at": "2025-03-11T15:42:24.345614"
       }
     }
   }

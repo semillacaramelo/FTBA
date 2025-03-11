@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
 Setup script for Deriv API integration.
-This script will guide you through the process of setting up your Deriv API credentials.
+This script guides you through the process of setting up and testing your Deriv API credentials.
 
 Usage:
 python scripts/setup_deriv.py
@@ -11,12 +11,129 @@ import os
 import sys
 import configparser
 import json
+import asyncio
+import importlib.util
 from pathlib import Path
 
-def main():
+# Import Deriv API client if available
+try:
+    from system.deriv_api_client import DerivApiClient
+    deriv_api_available = True
+except ImportError:
+    deriv_api_available = False
+
+async def test_api_connection(app_id, token):
+    """
+    Test the connection to Deriv API with the provided credentials.
+    
+    Args:
+        app_id: The Deriv App ID
+        token: The Demo API token
+        
+    Returns:
+        bool: True if connection was successful, False otherwise
+    """
+    print("\nTesting connection to Deriv API...", end="", flush=True)
+    try:
+        # Save original environment variables to restore later
+        original_app_id = os.environ.get("DERIV_APP_ID")
+        original_token = os.environ.get("DERIV_DEMO_API_TOKEN")
+        
+        # Temporarily set environment variables for testing
+        os.environ["DERIV_APP_ID"] = app_id
+        os.environ["DERIV_DEMO_API_TOKEN"] = token
+        
+        # Initialize API client
+        api_client = DerivApiClient(app_id)
+        
+        # Try to connect
+        connected = await api_client.connect(retry_count=1)
+        if not connected:
+            print("\r❌ Failed to connect to Deriv API. Please check your credentials.")
+            return False
+        
+        # Test API authorization
+        ping_successful = await api_client.ping()
+        if not ping_successful:
+            print("\r❌ Connection established but API authorization failed.")
+            return False
+        
+        # Get account balance to verify token works
+        balance_data = await api_client.get_account_balance()
+        if not balance_data or 'error' in balance_data:
+            print("\r❌ Connection established but couldn't retrieve account information.")
+            return False
+        
+        # Test successful, show account info
+        currency = balance_data.get('currency', 'USD')
+        balance = balance_data.get('balance', 0.0)
+        print(f"\r✅ Successfully connected to Deriv API!")
+        print(f"   Account type: DEMO")
+        print(f"   Balance: {balance} {currency}")
+        
+        # Disconnect cleanly
+        await api_client.disconnect()
+        
+        # Restore original environment if existed
+        if original_app_id:
+            os.environ["DERIV_APP_ID"] = original_app_id
+        else:
+            os.environ.pop("DERIV_APP_ID", None)
+            
+        if original_token:
+            os.environ["DERIV_DEMO_API_TOKEN"] = original_token
+        else:
+            os.environ.pop("DERIV_DEMO_API_TOKEN", None)
+            
+        return True
+        
+    except Exception as e:
+        print(f"\r❌ Error testing connection: {str(e)}")
+        return False
+
+def check_dependencies():
+    """Check if required dependencies are installed"""
+    missing = []
+    
+    # Check for websockets package with correct version
+    try:
+        websockets_spec = importlib.util.find_spec("websockets")
+        if websockets_spec:
+            import websockets
+            if websockets.__version__ != "10.3":
+                missing.append("websockets==10.3 (Found version: {})".format(websockets.__version__))
+        else:
+            missing.append("websockets==10.3")
+    except (ImportError, AttributeError):
+        missing.append("websockets==10.3")
+    
+    # Check for python-deriv-api package
+    if not deriv_api_available:
+        missing.append("python-deriv-api")
+    
+    return missing
+
+async def main_async():
     print("\n=== Deriv API Setup Wizard ===\n")
     print("This wizard will help you configure your Deriv API credentials for the FTBA system.")
-    print("You will need:")
+    
+    # Check dependencies first
+    missing_deps = check_dependencies()
+    if missing_deps:
+        print("\n⚠️ Warning: Some required dependencies are missing:")
+        for dep in missing_deps:
+            print(f"  - {dep}")
+        
+        print("\nPlease install the missing dependencies with:")
+        print("  pip install -r requirements.txt")
+        print("  pip install git+https://github.com/deriv-com/python-deriv-api.git#egg=python-deriv-api\n")
+        
+        proceed = input("Do you want to continue anyway? (y/n): ").lower().strip()
+        if proceed != 'y':
+            print("\nExiting setup wizard. Please install the required dependencies and try again.")
+            return
+    
+    print("\nYou will need:")
     print("  1. A Deriv App ID (create one at https://developers.deriv.com/)")
     print("  2. A Demo API token (create one at https://app.deriv.com/account/api-token)")
     print("\nNote: For testing purposes, always use a DEMO account token!")
@@ -30,10 +147,23 @@ def main():
         print(f"  App ID: {existing_app_id}")
         print(f"  Demo API Token: {'*' * 8 + existing_token[-4:] if existing_token else 'Not set'}")
         
-        update = input("\nDo you want to update these credentials? (y/n): ").lower().strip()
-        if update != 'y':
-            print("\nKeeping existing credentials. Setup completed!")
-            return
+        # Test existing connection if dependencies are available
+        if not missing_deps and deriv_api_available:
+            test_existing = input("\nDo you want to test these credentials? (y/n): ").lower().strip()
+            if test_existing == 'y':
+                connection_successful = await test_api_connection(existing_app_id, existing_token)
+                if connection_successful:
+                    keep_existing = input("\nCredentials are working. Keep them? (y/n): ").lower().strip()
+                    if keep_existing == 'y':
+                        print("\nKeeping existing credentials. Setup completed!")
+                        return
+                else:
+                    print("\nExisting credentials failed to connect. Let's set up new ones.")
+        else:
+            update = input("\nDo you want to update these credentials? (y/n): ").lower().strip()
+            if update != 'y':
+                print("\nKeeping existing credentials. Setup completed!")
+                return
     
     # Get new credentials
     app_id = input("\nEnter your Deriv App ID: ").strip()
@@ -42,6 +172,15 @@ def main():
     if not app_id or not token:
         print("\nError: Both App ID and Demo API Token are required.")
         return
+    
+    # Test new credentials if dependencies are available
+    if not missing_deps and deriv_api_available:
+        connection_successful = await test_api_connection(app_id, token)
+        if not connection_successful:
+            retry = input("\nConnection test failed. Do you want to continue anyway? (y/n): ").lower().strip()
+            if retry != 'y':
+                print("\nExiting setup. Please check your credentials and try again.")
+                return
     
     # Setup method selection
     print("\nHow would you like to store these credentials?")
@@ -78,12 +217,13 @@ def main():
             print("Source this script before starting the application:")
             print("  source ./set_deriv_env.sh")
         
-        # For Replit environment, also update the Secrets
+        # For Replit environment, also update the current environment
         if os.environ.get('REPL_ID'):
-            print("\nDetected Replit environment. Adding to Replit Secrets...")
-            print("Note: This requires the REPLIT_DB_URL to be set.")
-            
-            print("Added credentials to Replit Secrets. These will be available in your environment.")
+            print("\nDetected Replit environment. Setting environment variables for current session...")
+            os.environ["DERIV_APP_ID"] = app_id
+            os.environ["DERIV_DEMO_API_TOKEN"] = token
+            print("Environment variables set for current session.")
+            print("For permanent storage, add these to your Replit Secrets.")
     
     elif choice == '2':
         # Save to config file
@@ -110,6 +250,14 @@ def main():
     print("\nSetup completed successfully!")
     print("\nTest your configuration by running:")
     print("  python main.py --tradetest")
+    print("\nFor a more extensive test with real trading functionality:")
+    print("  python main.py --tradetest")
+
+def main():
+    """Run the async main function"""
+    if sys.platform == 'win32':
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    asyncio.run(main_async())
 
 if __name__ == "__main__":
     main()

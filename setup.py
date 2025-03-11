@@ -13,7 +13,7 @@ setup(
         "statsmodels>=0.14.0",
         "python-ta>=1.0.0",
         "aiohttp>=3.8.5",
-        "websockets>=11.0.3",
+        "websockets==10.3",
         "pymongo>=4.4.1",
         "python-dateutil>=2.8.2",
         "pytz>=2023.3",

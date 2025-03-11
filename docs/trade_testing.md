@@ -11,7 +11,10 @@ Before using the trade testing feature, make sure you have:
 1. A Deriv account (register at [Deriv.com](https://deriv.com) if you don't have one)
 2. A Deriv App ID (create one at [Deriv Developers](https://developers.deriv.com/))
 3. A Demo API token (create one at [Deriv API Token Page](https://app.deriv.com/account/api-token))
-4. Configured these credentials in your environment (see [Dependency Management](dependency_management.md))
+4. Installed dependencies with the **correct versions** (specifically `websockets==10.3`)
+5. Configured your API credentials in your environment (see [Dependency Management](dependency_management.md))
+
+> **Important Note**: The Deriv API requires `websockets==10.3` specifically. Using other versions will cause compatibility issues.
 
 ## Setting Up Credentials
 
@@ -87,17 +90,40 @@ After running the test, check the output log file (`tradetest_output.log`) for d
 
 If you encounter issues with trade testing:
 
-1. **Connection Issues**: Verify your internet connection and firewall settings.
-2. **Authentication Errors**: Confirm your API token is valid and has appropriate permissions.
-3. **Invalid App ID**: Verify your App ID is correct and registered with Deriv.
-4. **Market Closed**: Some symbols are only available during market hours. Try EUR/USD which has longer trading hours.
-5. **Insufficient Funds**: Ensure your demo account has sufficient balance.
+1. **Dependency Version Conflicts**: Ensure you have `websockets==10.3` installed. Other versions will cause conflicts with the Deriv API.
+2. **Connection Issues**: Verify your internet connection and firewall settings.
+3. **Authentication Errors**: Confirm your API token is valid and has appropriate permissions.
+4. **Invalid App ID**: Verify your App ID is correct and registered with Deriv.
+5. **Market Closed**: Some symbols are only available during market hours. Try EUR/USD which has longer trading hours.
+6. **Insufficient Funds**: Ensure your demo account has sufficient balance.
+7. **WebSocket Errors**: If you see errors related to WebSocket connections, check your websockets package version.
 
 Run the check dependencies script to verify all required components are installed:
 
 ```bash
 python scripts/check_dependencies.py
 ```
+
+### Common Error Messages
+
+1. **"Cannot install websockets and websockets==10.3 because these package versions have conflicting dependencies"**
+   - Solution: Uninstall any existing websockets package and install specifically version 10.3:
+   ```bash
+   pip uninstall -y websockets
+   pip install websockets==10.3
+   ```
+
+2. **"Error: deriv_api module not found"**
+   - Solution: Install the python-deriv-api package:
+   ```bash
+   pip install git+https://github.com/deriv-com/python-deriv-api.git#egg=python-deriv-api
+   ```
+
+3. **"Connection to Deriv API failed"**
+   - Solution: Check your API credentials and internet connection. Run the setup wizard to test your connection:
+   ```bash
+   python scripts/setup_deriv.py
+   ```
 
 ## Important Notes
 
