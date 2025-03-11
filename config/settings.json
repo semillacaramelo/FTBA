@@ -1,4 +1,3 @@
-
 {
   "system": {
     "log_level": "INFO",
@@ -8,14 +7,33 @@
   "agents": {
     "technical_analysis": {
       "enabled": true,
-      "indicators": ["moving_average", "rsi", "macd"],
-      "timeframes": ["1h", "4h", "1d"],
-      "symbols": ["EUR/USD", "GBP/USD", "USD/JPY"]
+      "indicators": [
+        "moving_average",
+        "rsi",
+        "macd"
+      ],
+      "timeframes": [
+        "1h",
+        "4h",
+        "1d"
+      ],
+      "symbols": [
+        "EUR/USD",
+        "GBP/USD",
+        "USD/JPY"
+      ]
     },
     "fundamental_analysis": {
       "enabled": true,
-      "data_sources": ["economic_calendar"],
-      "currencies": ["EUR", "USD", "GBP", "JPY"]
+      "data_sources": [
+        "economic_calendar"
+      ],
+      "currencies": [
+        "EUR",
+        "USD",
+        "GBP",
+        "JPY"
+      ]
     },
     "risk_management": {
       "enabled": true,
@@ -30,8 +48,24 @@
     },
     "trade_execution": {
       "enabled": true,
-      "gateway_type": "simulation",
-      "api_key": ""
+      "gateway_type": "deriv",
+      "api_key": "",
+      "use_demo_account": true
     }
+  },
+  "deriv_api": {
+    "app_id": "VW2ILcRli7jNOGp",
+    "endpoint": "wss://ws.binaryws.com/websockets/v3",
+    "account_type": "demo",
+    "symbols_mapping": {
+      "EUR/USD": "frxEURUSD",
+      "GBP/USD": "frxGBPUSD",
+      "USD/JPY": "frxUSDJPY",
+      "USD/CHF": "frxUSDCHF",
+      "AUD/USD": "frxAUDUSD"
+    },
+    "default_contract_type": "CALL/PUT",
+    "default_duration": 5,
+    "default_duration_unit": "m"
   }
 }
