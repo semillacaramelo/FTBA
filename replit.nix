@@ -1,5 +1,9 @@
 {pkgs}: {
   deps = [
+    pkgs.rustc
+    pkgs.openssl
+    pkgs.libiconv
+    pkgs.cargo
     pkgs.libxcrypt
     pkgs.tk
     pkgs.tcl

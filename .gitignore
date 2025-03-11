@@ -1,4 +1,4 @@
-# Python specific
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -20,35 +20,25 @@ wheels/
 .installed.cfg
 *.egg
 
-# Environment and IDE
-.env
-.venv
-env/
+# Logs
+logs/
+*.log
+
+# Data
+data/storage/
+
+# Config
+config/config.yaml
+
+# Virtual Environment
 venv/
-ENV/
-env.bak/
-venv.bak/
+env/
+
+# IDE
 .idea/
 .vscode/
 *.swp
 *.swo
-
-# Project specific
-config/settings.json
-logs/*.log
-data/market_data/*
-data/economic_calendar/*
-data/performance/*
-!data/market_data/.gitkeep
-!data/economic_calendar/.gitkeep
-!data/performance/.gitkeep
-
-# Deriv API - exclude the cloned repository
-python-deriv-api/
-
-# Replit specific
-.replit.backup
-.breakpoints
 
 # OS specific
 .DS_Store

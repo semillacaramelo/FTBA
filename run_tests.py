@@ -1,75 +1,96 @@
+#!/usr/bin/env python3
+"""
+Test runner for FTBA application.
+Discovers and runs all tests.
+"""
+
 import os
 import sys
-import importlib
-import subprocess
+import unittest
+import logging
+from typing import List, Optional
 
-def run_static_analysis():
-    """Run basic static analysis on Python files"""
-    print("Running static analysis...")
-    import_errors = []
-    syntax_errors = []
+# Configure logging to avoid test logs cluttering output
+logging.basicConfig(level=logging.CRITICAL)
 
-    # Find all Python files
-    python_files = []
-    for root, _, files in os.walk('.'):
-        if 'venv' in root or '.git' in root or 'python-deriv-api' in root:
-            continue
-        for file in files:
-            if file.endswith('.py'):
-                python_files.append(os.path.join(root, file))
+def run_tests(pattern: Optional[str] = None) -> bool:
+    """
+    Run the test suite.
+    
+    Args:
+        pattern: Optional pattern to filter tests
+        
+    Returns:
+        True if all tests passed, False otherwise
+    """
+    # Add the current directory to the Python path
+    sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+    
+    # Discover and run tests
+    loader = unittest.TestLoader()
+    
+    if pattern:
+        suite = loader.discover('tests', pattern=pattern)
+    else:
+        suite = loader.discover('tests')
+    
+    runner = unittest.TextTestRunner(verbosity=2)
+    result = runner.run(suite)
+    
+    # Return True if successful, False otherwise
+    return result.wasSuccessful()
 
-    # Check each file for syntax and import errors
-    for file_path in python_files:
-        print(f"Checking {file_path}")
-        try:
-            with open(file_path, 'r') as f:
-                source = f.read()
-            # Check for syntax errors
-            compile(source, file_path, 'exec')
 
-            # Check for import errors (by attempting to import the module)
-            module_path = file_path.replace('/', '.').replace('\\', '.').replace('.py', '')
-            if module_path.startswith('.'):
-                module_path = module_path[1:]
-            try:
-                # Skip actual import for test files to avoid running them
-                if not file_path.startswith('./tests/'):
-                    __import__(module_path)
-            except ImportError as e:
-                import_errors.append((file_path, str(e)))
-        except SyntaxError as e:
-            syntax_errors.append((file_path, str(e)))
+def list_tests() -> List[str]:
+    """
+    List all available tests without running them.
+    
+    Returns:
+        List of test case names
+    """
+    loader = unittest.TestLoader()
+    suite = loader.discover('tests')
+    
+    test_cases = []
+    
+    def extract_test_cases(suite_or_case):
+        """Extract test cases from a test suite recursively"""
+        if hasattr(suite_or_case, '_tests'):
+            for test in suite_or_case._tests:
+                extract_test_cases(test)
+        else:
+            test_cases.append(suite_or_case.id())
+    
+    extract_test_cases(suite)
+    return sorted(test_cases)
 
-    # Print results
-    if syntax_errors:
-        print("\nSyntax Errors:")
-        for file_path, error in syntax_errors:
-            print(f"  {file_path}: {error}")
-
-    if import_errors:
-        print("\nImport Errors:")
-        for file_path, error in import_errors:
-            print(f"  {file_path}: {error}")
-
-    return not (syntax_errors or import_errors)
-
-def run_tests():
-    """Run unit tests"""
-    print("\nRunning unit tests...")
-    result = subprocess.run(['pytest', '-v'], capture_output=True, text=True)
-    print(result.stdout)
-    if result.stderr:
-        print("Errors:", result.stderr)
-    return result.returncode == 0
 
 if __name__ == "__main__":
-    print("=== Running Code Quality Checks ===")
-    static_check_passed = run_static_analysis()
-    test_passed = run_tests()
-
-    if static_check_passed and test_passed:
-        print("\n✅ All checks passed!")
-        sys.exit(0)
+    import argparse
+    
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Run FTBA tests')
+    parser.add_argument('--pattern', '-p', help='Pattern to filter tests')
+    parser.add_argument('--list', '-l', action='store_true', help='List available tests')
+    parser.add_argument('--verbose', '-v', action='store_true', help='Show verbose output')
+    
+    args = parser.parse_args()
+    
+    if args.verbose:
+        logging.basicConfig(level=logging.DEBUG)
+    
+    if args.list:
+        # List available tests
+        tests = list_tests()
+        print(f"Available tests ({len(tests)}):")
+        for test in tests:
+            print(f"  {test}")
     else:
-        print("\n❌ Some checks failed!")
-        sys.exit(1)
+        # Run tests
+        pattern_msg = f" (pattern: {args.pattern})" if args.pattern else ""
+        print(f"Running FTBA tests{pattern_msg}...")
+        
+        success = run_tests(args.pattern)
+        
+        # Exit with appropriate code
+        sys.exit(0 if success else 1)
