@@ -4,10 +4,14 @@ Core data structures and enumerations for the multi-agent forex trading system.
 These serve as the foundation for communication and data representation throughout the system.
 """
 
-from dataclasses import dataclass, field
+import asyncio
+import json
+import logging
+from collections import defaultdict
+from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from enum import Enum, auto
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, List, Any, Optional, Union, Callable, Set, Awaitable
 
 
 class Direction(Enum):
@@ -250,3 +254,80 @@ class MarketData:
             except ValueError:
                 # Keep as None if not matching any Timeframe enum
                 self.timeframe = None
+
+
+class MessageBroker:
+    """
+    Central message broker for system-wide event distribution.
+    Implements a publish-subscribe pattern for decoupled agent communication.
+    """
+    
+    def __init__(self):
+        self.logger = logging.getLogger("message_broker")
+        self.subscribers = defaultdict(set)
+        self.message_queue = asyncio.Queue()
+        self._running = False
+        self._processor_task = None
+    
+    async def start(self):
+        """Start the message processor"""
+        if self._running:
+            return
+            
+        self._running = True
+        self._processor_task = asyncio.create_task(self._process_messages())
+        self.logger.info("Message broker started")
+    
+    async def stop(self):
+        """Stop the message processor"""
+        if not self._running:
+            return
+            
+        self._running = False
+        if self._processor_task:
+            self._processor_task.cancel()
+            try:
+                await self._processor_task
+            except asyncio.CancelledError:
+                pass
+            self._processor_task = None
+        self.logger.info("Message broker stopped")
+    
+    def subscribe(self, topic: str, callback: Callable[[Dict[str, Any]], Awaitable[None]]):
+        """Subscribe to a topic with a callback function"""
+        self.subscribers[topic].add(callback)
+        self.logger.debug(f"Subscribed to topic: {topic}")
+    
+    def unsubscribe(self, topic: str, callback: Callable[[Dict[str, Any]], Awaitable[None]]):
+        """Unsubscribe from a topic"""
+        if topic in self.subscribers and callback in self.subscribers[topic]:
+            self.subscribers[topic].remove(callback)
+            self.logger.debug(f"Unsubscribed from topic: {topic}")
+    
+    async def publish(self, topic: str, message: Dict[str, Any]):
+        """Publish a message to a topic"""
+        await self.message_queue.put((topic, message))
+        self.logger.debug(f"Published message to topic: {topic}")
+    
+    async def _process_messages(self):
+        """Process messages from the queue and distribute to subscribers"""
+        self.logger.debug("Message processor started")
+        
+        while self._running:
+            try:
+                topic, message = await self.message_queue.get()
+                
+                if topic in self.subscribers:
+                    for callback in self.subscribers[topic]:
+                        try:
+                            await callback(message)
+                        except Exception as e:
+                            self.logger.error(f"Error in subscriber callback: {e}", exc_info=True)
+                
+                self.message_queue.task_done()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.logger.error(f"Error processing message: {e}", exc_info=True)
+        
+        self.logger.debug("Message processor stopped")
