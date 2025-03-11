@@ -37,3 +37,4 @@ cryptography>=41.0.3  # For secure communication
 # Deriv API
 websocket-client>=1.5.0
 simplejson>=3.17.6
+git+https://github.com/deriv-com/python-deriv-api.git#egg=deriv-api

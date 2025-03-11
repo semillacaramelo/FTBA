@@ -1,12 +1,8 @@
-# Byte-compiled / optimized / DLL files
+# Python specific
 __pycache__/
 *.py[cod]
 *$py.class
-
-# C extensions
 *.so
-
-# Distribution / packaging
 .Python
 build/
 develop-eggs/
@@ -24,13 +20,7 @@ wheels/
 .installed.cfg
 *.egg
 
-# IDE specific files
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# Environments
+# Environment and IDE
 .env
 .venv
 env/
@@ -38,75 +28,28 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+.idea/
+.vscode/
+*.swp
+*.swo
 
-# Logs
-logs/*.log
-
-# Local configuration
+# Project specific
 config/settings.json
+logs/*.log
+data/market_data/*
+data/economic_calendar/*
+data/performance/*
+!data/market_data/.gitkeep
+!data/economic_calendar/.gitkeep
+!data/performance/.gitkeep
 
-# Deriv API
+# Deriv API - exclude the cloned repository
 python-deriv-api/
-python_deriv_api.egg-info/
-attached_assets/
 
 # Replit specific
 .replit.backup
 .breakpoints
 
-# Python
-# __pycache__/
-# *.py[cod]
-# *$py.class
-# *.so
-# .Python
-# build/
-# develop-eggs/
-# dist/
-# downloads/
-# eggs/
-# .eggs/
-# lib/
-# lib64/
-# parts/
-# sdist/
-# var/
-# wheels/
-# *.egg-info/
-# .installed.cfg
-# *.egg
-
-# Environment
-# .env
-# .venv
-# env/
-# venv/
-# ENV/
-
-# IDE/Editor specific
-# .idea/
-# .vscode/
-# *.swp
-# *.swo
-# *~
-
-# Logs and databases
-# *.log
-# *.sqlite3
-# *.db
-
-# Project specific
-# config/settings.json
-# data/market_data/*
-# data/economic_calendar/*
-# data/performance/*
-# !data/market_data/.gitkeep
-# !data/economic_calendar/.gitkeep
-# !data/performance/.gitkeep
-
 # OS specific
-# .DS_Store
-# Thumbs.db
-
-# Attachments
-# attached_assets/
+.DS_Store
+Thumbs.db
